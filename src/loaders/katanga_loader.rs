@@ -1,6 +1,8 @@
+use std::{ffi::c_void, ptr, error::Error};
+
 use windows::{
     Win32::{
-        Foundation::{CloseHandle},
+        Foundation::{HANDLE, CloseHandle},
         System::Memory::{
             MapViewOfFile, OpenFileMappingA, FILE_MAP_ALL_ACCESS, UnmapViewOfFile,
         },
@@ -9,31 +11,46 @@ use windows::{
 
 use super::Loader;
 
-pub struct KatangaLoaderContext {}
+pub struct KatangaLoaderContext {
+    katanga_file_handle: HANDLE,
+    katanga_file_mapping: *mut c_void,
+}
 
 impl Loader for KatangaLoaderContext {
-    fn load(&self) -> bool {
-        let handle =
-        unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile") }
-            .expect("Cannot open katanga file!");
+    fn load(&mut self) -> Result<(), Box<dyn Error>> {
+        self.katanga_file_handle =
+        unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile")? };
 
-        println!("Handle: {:?}", handle);
+        println!("Handle: {:?}", self.katanga_file_handle);
 
-        let file_view = unsafe { MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, 4) };
-        if file_view as usize == 0 {
-            panic!("Cannot map file!");
+        self.katanga_file_mapping = unsafe { MapViewOfFile(self.katanga_file_handle, FILE_MAP_ALL_ACCESS, 0, 0, 4) };
+        if self.katanga_file_mapping.is_null() {
+            return Err("Cannot map file!".into());
         }
-        let address = unsafe { *(file_view as *mut usize).as_ref().unwrap() };
+
+        let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
         println!("{:#01x}", address);
 
-        if unsafe { bool::from(UnmapViewOfFile(file_view)) } {
+        Ok(())
+    }
+}
+
+impl Default for KatangaLoaderContext {
+    fn default() -> Self {
+        Self { katanga_file_handle: Default::default(), katanga_file_mapping: ptr::null_mut() }
+    }
+}
+
+impl Drop for KatangaLoaderContext {
+    fn drop(&mut self) {
+        println!("Dropping KatangaLoaderContext");
+
+        if !self.katanga_file_mapping.is_null() && unsafe { bool::from(UnmapViewOfFile(self.katanga_file_mapping)) } {
             println!("Unmapped file!");
         }
-
-        if unsafe { bool::from(CloseHandle(handle)) } {
+    
+        if !self.katanga_file_handle.is_invalid() && unsafe { bool::from(CloseHandle(self.katanga_file_handle)) } {
             println!("Closed handle!");
         }
-
-        true
     }
 }
