@@ -10,6 +10,7 @@ wgpu = "0.13.1"
 winit = "0.26"
 pollster = "0.2"
 env_logger = "0.9"
+mint = "0.5.9"
 
 [dependencies.windows]
 version = "0.38.0"
