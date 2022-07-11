@@ -1,5 +1,4 @@
 use loaders::Loader;
-use wgpu_hal::api::Vulkan;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -83,8 +82,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     surface.configure(&device, &config);
 
-    let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
-    cata.load(&instance, &device).unwrap();
+    #[cfg(target_os = "windows")]
+    {
+        let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
+        cata.load(&instance, &device).unwrap();
+    }
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
