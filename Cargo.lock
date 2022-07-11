@@ -1100,10 +1100,12 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "vr-screen-cap"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "env_logger",
  "mint",
  "pollster",
  "wgpu",
+ "wgpu-hal",
  "windows",
  "winit",
 ]

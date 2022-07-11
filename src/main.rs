@@ -1,3 +1,5 @@
+use loaders::Loader;
+use wgpu_hal::api::Vulkan;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -10,7 +12,8 @@ use std::borrow::Cow;
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
-    let instance = wgpu::Instance::new(wgpu::Backends::all());
+    let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
+
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -79,6 +82,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     };
 
     surface.configure(&device, &config);
+
+    let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
+    cata.load(&instance, &device).unwrap();
 
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
