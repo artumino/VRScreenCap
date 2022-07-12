@@ -9,6 +9,7 @@ edition = "2021"
 wgpu = "0.13.1"
 wgpu-hal = { version = "0.13.1", features = ["vulkan"] }
 ash = "0.37.0+1.3.209"
+ash-window = "0.10.0"
 winit = "0.26"
 pollster = "0.2"
 env_logger = "0.9"

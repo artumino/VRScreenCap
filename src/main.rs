@@ -1,4 +1,6 @@
+use ash::{extensions::{khr::{Swapchain, ExternalMemoryWin32}, ext::DebugUtils}, vk, prelude::VkResult};
 use loaders::Loader;
+use wgpu_hal::{api::Vulkan, InstanceError};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -7,11 +9,110 @@ use winit::{
 
 pub mod loaders;
 pub mod engine;
-use std::borrow::Cow;
+use std::{borrow::Cow, ffi::{CStr, CString}, os::raw::c_char, slice};
+
+pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
+
+pub fn get_vulkan_instance_extensions(entry: &ash::Entry) -> Result<Vec<&'static CStr>, InstanceError> {
+    let mut flags = wgpu_hal::InstanceFlags::empty();
+    if cfg!(debug_assertions) {
+        flags |= wgpu_hal::InstanceFlags::VALIDATION;
+        flags |= wgpu_hal::InstanceFlags::DEBUG;
+    }
+
+    <wgpu_hal::api::Vulkan as wgpu_hal::Api>::Instance::required_extensions(entry, flags)
+}
+
+// Hal adapter used to get required device extensions and features
+pub fn create_wgpu_instance(
+    entry: ash::Entry,
+    version: u32,
+    instance: ash::Instance
+) -> Result<wgpu::Instance, InstanceError> {
+    let mut instance_extensions = get_vulkan_instance_extensions(&entry)?;
+    instance_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
+
+    let mut flags = wgpu_hal::InstanceFlags::empty();
+    if cfg!(debug_assertions) {
+        flags |= wgpu_hal::InstanceFlags::VALIDATION;
+        flags |= wgpu_hal::InstanceFlags::DEBUG;
+    };
+
+    Ok(unsafe { wgpu::Instance::from_hal::<Vulkan>(
+        <wgpu_hal::api::Vulkan as wgpu_hal::Api>::Instance::from_raw(
+            entry,
+            instance,
+            version,
+            0,
+            instance_extensions,
+            flags,
+            false,
+            None, // <-- the instance is not destroyed on drop
+        )?
+    )})
+}
+
+pub fn create_vulkan_instance(
+    entry: &ash::Entry,
+    info: &vk::InstanceCreateInfo,
+) -> VkResult<ash::Instance> {
+    let mut extensions_ptrs = get_vulkan_instance_extensions(entry).unwrap()
+        .iter()
+        .map(|x| x.as_ptr())
+        .collect::<Vec<_>>();
+
+    extensions_ptrs.extend_from_slice(unsafe {
+        slice::from_raw_parts(
+            info.pp_enabled_extension_names,
+            info.enabled_extension_count as _,
+        )
+    });
+
+    let layers: Vec<&CStr> = vec![];//vec![CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0").unwrap()];
+    let layers_ptrs = layers.iter().map(|x| x.as_ptr()).collect::<Vec<_>>();
+
+    unsafe {
+        entry
+            .create_instance(
+                &vk::InstanceCreateInfo {
+                    enabled_extension_count: extensions_ptrs.len() as _,
+                    pp_enabled_extension_names: extensions_ptrs.as_ptr(),
+                    enabled_layer_count: layers_ptrs.len() as _,
+                    pp_enabled_layer_names: layers_ptrs.as_ptr(),
+                    ..*info
+                },
+                None,
+            )
+    }
+}
+
+pub fn get_vulkan_graphics_device(
+    instance: &ash::Instance,
+    adapter_index: Option<usize>,
+) -> VkResult<vk::PhysicalDevice> {
+    let mut physical_devices = unsafe { instance.enumerate_physical_devices()? };
+
+    Ok(physical_devices.remove(adapter_index.unwrap_or(0)))
+}
+
+async unsafe fn create_wgpu_from_hal() -> wgpu::Instance {
+    let entry = ash::Entry::load().unwrap();
+    let raw_instance = create_vulkan_instance(
+        &entry,
+        &vk::InstanceCreateInfo::builder()
+            .application_info(
+                &vk::ApplicationInfo::builder().api_version(TARGET_VULKAN_VERSION),
+            )
+            .build(),
+    ).unwrap();
+    
+    create_wgpu_instance(entry.clone(), TARGET_VULKAN_VERSION, raw_instance).unwrap()
+}
 
 async fn run(event_loop: EventLoop<()>, window: Window) {
     let size = window.inner_size();
-    let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
+    
+    let instance  = unsafe { create_wgpu_from_hal().await };
 
     let surface = unsafe { instance.create_surface(&window) };
     let adapter = instance
@@ -38,7 +139,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         )
         .await
         .expect("Failed to create device");
-
     // Load the shaders from disk
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
