@@ -81,14 +81,14 @@ impl Loader for KatangaLoaderContext {
                                             .handle_type(
                                                 handle_type,
                                             )
-                                            //.handle((address | 0xFFFFFFFF00000000) as vk::HANDLE);
-                                            .handle(self.katanga_file_mapping);
+                                            .handle((address | 0xFFFFFFFF00000000) as vk::HANDLE);
+                                            //.handle(self.katanga_file_mapping);
 
                                     let allocate_info = vk::MemoryAllocateInfo::builder()
                                         .push_next(&mut import_memory_info)
                                         .push_next(&mut dedicated_allocate_info)
-                                        .allocation_size(img_req.size);
-                                    //TODO: .memory_type_index(memory_type_index);
+                                        .allocation_size(img_req.size)
+                                        .memory_type_index(0);
 
                                     raw_device
                                         .allocate_memory(&allocate_info, None)
