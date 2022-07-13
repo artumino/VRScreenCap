@@ -1,8 +1,8 @@
 use std::{error::Error, ffi::{c_void, CString}, ptr};
 
 use ash::{vk::{self, ImageCreateInfo}, extensions::khr::ExternalMemoryWin32};
-use wgpu::{Device, Instance};
-use wgpu_hal::api::Vulkan;
+use wgpu::{Device, Instance, Texture, TextureUsages};
+use wgpu_hal::{api::Vulkan, TextureDescriptor, TextureUses, MemoryFlags};
 use windows::Win32::{
     Foundation::{CloseHandle, HANDLE},
     System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS},
@@ -16,7 +16,7 @@ pub struct KatangaLoaderContext {
 }
 
 impl Loader for KatangaLoaderContext {
-    fn load(&mut self, instance: &Instance, device: &Device) -> Result<(), Box<dyn Error>> {
+    fn load(&mut self, instance: &Instance, device: &Device) -> Result<wgpu::Texture, Box<dyn Error>> {
         self.katanga_file_handle =
             unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile")? };
         println!("Handle: {:?}", self.katanga_file_handle);
@@ -31,10 +31,10 @@ impl Loader for KatangaLoaderContext {
         println!("{:#01x}", address | 0xFFFFFFFF00000000);
 
 
-        let _raw_image = unsafe {
+        let raw_image = unsafe {
             instance.as_hal::<Vulkan, _, _>(|instance| {
                 instance.map(|instance| {
-                let raw_instance = instance.shared_instance().raw_instance();
+                let _raw_instance = instance.shared_instance().raw_instance();
                 device.as_hal::<Vulkan, _, _>(|device| {
                     device
                         .map(|device| {
@@ -89,7 +89,6 @@ impl Loader for KatangaLoaderContext {
                                         .push_next(&mut dedicated_allocate_info)
                                         .allocation_size(img_req.size)
                                         .memory_type_index(0);
-
                                     raw_device
                                         .allocate_memory(&allocate_info, None)
                                         .map(|allocated_memory| {
@@ -97,15 +96,37 @@ impl Loader for KatangaLoaderContext {
                                                 .bind_image_memory(raw_image, allocated_memory, 0)
                                                 .map(|_bound_image| raw_image)
                                                 .unwrap()
-                                        })
-                                        .unwrap()
+                                    })
                                 })
                         }).unwrap()
                     })
                 }).unwrap()
             })
-        }?;
-        Ok(())
+        }??;
+
+        let text_descriptor = TextureDescriptor {
+            label: "KatangaStream".into(),
+            size: wgpu::Extent3d { width: 3840, height: 1080, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: TextureUses::EXCLUSIVE,
+            memory_flags: MemoryFlags::empty(),
+        };
+
+        let texture = unsafe { <wgpu_hal::api::Vulkan as wgpu_hal::Api>::Device::texture_from_raw(raw_image, &text_descriptor, None) };
+        //Texture::from_raw(raw_image);
+        //device.create_texture_from_hal::<Vulkan, _, _>(raw_image, desc)
+        Ok(unsafe { device.create_texture_from_hal::<Vulkan>(texture, &wgpu::TextureDescriptor {
+            label: "KatangaStream".into(),
+            size: wgpu::Extent3d { width: 3840, height: 1080, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::all(),
+        })})
     }
 }
 
