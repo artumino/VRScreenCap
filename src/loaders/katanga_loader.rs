@@ -34,24 +34,27 @@ impl Loader for KatangaLoaderContext {
         let raw_image = unsafe {
             instance.as_hal::<Vulkan, _, _>(|instance| {
                 instance.map(|instance| {
-                let _raw_instance = instance.shared_instance().raw_instance();
+                let raw_instance = instance.shared_instance().raw_instance();
                 device.as_hal::<Vulkan, _, _>(|device| {
                     device
                         .map(|device| {
                             let raw_device = device.raw_device();
 
                             //let raw_phys_device = device.raw_physical_device();
-                            let handle_type = vk::ExternalMemoryHandleTypeFlagsNV::D3D11_IMAGE_KMT;
+                            let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT;
 
-                            let mut dedicated_creation_info = vk::DedicatedAllocationImageCreateInfoNV::builder()
-                                .dedicated_allocation(true);
+                            let mem_ext = ash::extensions::khr::ExternalMemoryWin32::new(raw_instance, raw_device);
+                            //let handle_properties = mem_ext.get_memory_win32_handle_properties(vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT, (address | 0xFFFFFFFF00000000) as vk::HANDLE).unwrap();
+                            
+                            //let mut dedicated_creation_info = vk::DedicatedAllocationImageCreateInfoNV::builder()
+                            //    .dedicated_allocation(true);
 
-                            let mut ext_create_info = vk::ExternalMemoryImageCreateInfoNV::builder()
+                            let mut ext_create_info = vk::ExternalMemoryImageCreateInfo::builder()
                                 .handle_types(handle_type);
                                 
                             let image_create_info = ImageCreateInfo::builder()
                                 .push_next(&mut ext_create_info)
-                                .push_next(&mut dedicated_creation_info)
+                                //.push_next(&mut dedicated_creation_info)
                                 .image_type(vk::ImageType::TYPE_2D)
                                 .format(vk::Format::R8G8B8A8_UNORM)
                                 .extent(vk::Extent3D {
@@ -73,11 +76,11 @@ impl Loader for KatangaLoaderContext {
                                     let img_req = raw_device.get_image_memory_requirements(raw_image);
 
                                     
-                                    let mut dedicated_allocate_info = vk::DedicatedAllocationMemoryAllocateInfoNV::builder()
-                                        .image(raw_image);
+                                    //let mut dedicated_allocate_info = vk::DedicatedAllocationMemoryAllocateInfoNV::builder()
+                                    //    .image(raw_image);
 
                                     let mut import_memory_info =
-                                        vk::ImportMemoryWin32HandleInfoNV::builder()
+                                        vk::ImportMemoryWin32HandleInfoKHR::builder()
                                             .handle_type(
                                                 handle_type,
                                             )
@@ -86,7 +89,7 @@ impl Loader for KatangaLoaderContext {
 
                                     let allocate_info = vk::MemoryAllocateInfo::builder()
                                         .push_next(&mut import_memory_info)
-                                        .push_next(&mut dedicated_allocate_info)
+                                        //.push_next(&mut dedicated_allocate_info)
                                         .allocation_size(img_req.size)
                                         .memory_type_index(0);
                                     raw_device
