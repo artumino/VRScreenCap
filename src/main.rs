@@ -1,5 +1,6 @@
 use ash::{extensions::{khr::{Swapchain, ExternalMemoryWin32}, ext::DebugUtils}, vk, prelude::VkResult};
 use loaders::Loader;
+use wgpu::{BindGroup, util::DeviceExt};
 use wgpu_hal::{api::Vulkan, InstanceError};
 use winit::{
     event::{Event, WindowEvent},
@@ -9,7 +10,43 @@ use winit::{
 
 pub mod loaders;
 pub mod engine;
-use std::{borrow::Cow, ffi::{CStr, CString}, os::raw::c_char, slice};
+use std::{borrow::Cow, ffi::{CStr, CString}, os::raw::c_char, slice, ops::Deref, time::Instant};
+
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    tex_coords: [f32; 2],
+}
+
+const TARGET_FPS: u64 = 60;
+
+impl Vertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+            
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        use std::mem;
+
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [-1.0, -1.0, 0.0], tex_coords: [0.0, 0.0] },
+    Vertex { position: [-1.0, 1.0, 0.0], tex_coords: [0.0, 1.0] },
+    Vertex { position: [1.0, 1.0, 0.0], tex_coords: [1.0, 1.0] },
+    Vertex { position: [1.0, -1.0, 0.0], tex_coords: [1.0, 0.0] },
+];
+
+const INDICES: &[u16] = &[
+    0, 2, 3,
+    0, 1, 2,
+];
 
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
 
@@ -139,6 +176,91 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         )
         .await
         .expect("Failed to create device");
+
+    //Vertices
+    let vertex_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        }
+    );
+    let num_vertices = VERTICES.len() as u32;
+
+    
+    let index_buffer = device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        }
+    );
+    let num_indices = INDICES.len() as u32;
+        
+    //Load loaders
+    let mut diffuse_bind_group = None;
+    let mut bind_group_layouts = vec!();
+    #[cfg(target_os = "windows")]
+    {
+        let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
+        let texture = cata.load(&instance, &device).unwrap();
+        // We don't need to configure the texture view much, so let's
+        // let wgpu define it.
+        let diffuse_texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let texture_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // This should match the filterable field of the
+                    // corresponding Texture entry above.
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label: Some("texture_bind_group_layout"),
+        });
+
+        diffuse_bind_group = Some(device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                    }
+                ],
+                label: Some("diffuse_bind_group"),
+            }
+        ));
+
+        bind_group_layouts.push(texture_bind_group_layout);
+    }
+
     // Load the shaders from disk
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
@@ -147,7 +269,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[],
+        bind_group_layouts: bind_group_layouts.iter().collect::<Vec<_>>().as_slice(),
         push_constant_ranges: &[],
     });
 
@@ -159,7 +281,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: "vs_main",
-            buffers: &[],
+            buffers: &[
+                Vertex::desc(),
+            ],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
@@ -182,17 +306,12 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     surface.configure(&device, &config);
 
-    #[cfg(target_os = "windows")]
-    {
-        let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
-        cata.load(&instance, &device).unwrap();
-    }
-
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
         // the resources are properly cleaned up.
-        let _ = (&instance, &adapter, &shader, &pipeline_layout);
+        let _ = (&instance, &adapter, &shader, &pipeline_layout, &vertex_buffer, &index_buffer, &diffuse_bind_group);
+        let start_time = Instant::now();
 
         *control_flow = ControlFlow::Wait;
         match event {
@@ -206,7 +325,10 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 surface.configure(&device, &config);
                 // On macos the window needs to be redrawn manually after resizing
                 window.request_redraw();
-            }
+            },
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                *control_flow = ControlFlow::Exit;
+            },
             Event::RedrawRequested(_) => {
                 let frame = surface
                     .get_current_texture()
@@ -230,17 +352,42 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         depth_stencil_attachment: None,
                     });
                     rpass.set_pipeline(&render_pipeline);
-                    rpass.draw(0..3, 0..1);
+
+                    if let Some(bind_group) = &diffuse_bind_group {
+                        rpass.set_bind_group(0, bind_group, &[]);
+                    }
+
+                    rpass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                    rpass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    rpass.draw_indexed(0..num_indices, 0, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
                 frame.present();
-            }
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
+            },
             _ => {}
+        }
+
+        match *control_flow {
+            ControlFlow::Exit => (),
+            _ => {
+                /*
+                 * Grab window handle from the display (untested - based on API)
+                 */
+                window.request_redraw();
+                /*
+                 * Below logic to attempt hitting TARGET_FPS.
+                 * Basically, sleep for the rest of our milliseconds
+                 */
+                let elapsed_time = Instant::now().duration_since(start_time).as_millis() as u64;
+    
+                let wait_millis = match 1000 / TARGET_FPS >= elapsed_time {
+                    true => 1000 / TARGET_FPS - elapsed_time,
+                    false => 0
+                };
+                let new_inst = start_time + std::time::Duration::from_millis(wait_millis);
+                *control_flow = ControlFlow::WaitUntil(new_inst);
+            }
         }
     });
 }
