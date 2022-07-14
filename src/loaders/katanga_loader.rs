@@ -1,6 +1,6 @@
 use std::{error::Error, ffi::{c_void, CString}, ptr};
 
-use ash::{vk::{self, ImageCreateInfo}, extensions::khr::ExternalMemoryWin32};
+use ash::{vk::{self, ImageCreateInfo, PFN_vkGetMemoryWin32HandlePropertiesKHR}, extensions::khr::ExternalMemoryWin32};
 use wgpu::{Device, Instance, Texture, TextureUsages};
 use wgpu_hal::{api::Vulkan, TextureDescriptor, TextureUses, MemoryFlags};
 use windows::Win32::{
@@ -39,11 +39,20 @@ impl Loader for KatangaLoaderContext {
                     device
                         .map(|device| {
                             let raw_device = device.raw_device();
-
+                            let tex_handle = (address | 0xFFFFFFFF00000000) as vk::HANDLE;
                             //let raw_phys_device = device.raw_physical_device();
                             let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT;
 
-                            let mem_ext = ash::extensions::khr::ExternalMemoryWin32::new(raw_instance, raw_device);
+                            //FIXME: Find out how...
+                            //let mem_ext = ash::extensions::khr::ExternalMemoryWin32::new(raw_instance, raw_device);
+
+                            //let mem_ext = vk::KhrExternalMemoryWin32Fn::load(|p_name| {
+                            //    raw_instance.get_device_proc_addr(raw_device.handle(), p_name.as_ptr()).unwrap() as *const c_void
+                            //});
+                            //let mut tex_properties = vk::MemoryWin32HandlePropertiesKHR::default();
+                            //(mem_ext.get_memory_win32_handle_properties_khr)(raw_device.handle(), handle_type, tex_handle, &mut tex_properties).result().unwrap();
+                            //println!("{:#01x}", tex_properties.memory_type_bits);
+                            
                             //let handle_properties = mem_ext.get_memory_win32_handle_properties(vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT, (address | 0xFFFFFFFF00000000) as vk::HANDLE).unwrap();
                             
                             //let mut dedicated_creation_info = vk::DedicatedAllocationImageCreateInfoNV::builder()
