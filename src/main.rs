@@ -1,54 +1,21 @@
 use ash::{extensions::{khr::{Swapchain, ExternalMemoryWin32}, ext::DebugUtils}, vk, prelude::VkResult};
+use engine::geometry::{Vertex, self, Mesh};
 use loaders::Loader;
 use wgpu::{BindGroup, util::DeviceExt};
 use wgpu_hal::{api::Vulkan, InstanceError};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::Window,
+    window::Window, dpi::LogicalSize,
 };
 
 pub mod loaders;
 pub mod engine;
 use std::{borrow::Cow, ffi::{CStr, CString}, os::raw::c_char, slice, ops::Deref, time::Instant};
 
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-const TARGET_FPS: u64 = 60;
-
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
-            
-    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
-
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-1.0, -1.0, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [-1.0, 1.0, 0.0], tex_coords: [0.0, 1.0] },
-    Vertex { position: [1.0, 1.0, 0.0], tex_coords: [1.0, 1.0] },
-    Vertex { position: [1.0, -1.0, 0.0], tex_coords: [1.0, 0.0] },
-];
-
-const INDICES: &[u16] = &[
-    0, 2, 3,
-    0, 1, 2,
-];
-
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
+
+const TARGET_FPS: u64 = 80;
 
 pub fn get_vulkan_instance_extensions(entry: &ash::Entry) -> Result<Vec<&'static CStr>, InstanceError> {
     let mut flags = wgpu_hal::InstanceFlags::empty();
@@ -178,24 +145,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         .expect("Failed to create device");
 
     //Vertices
-    let vertex_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        }
-    );
-    let num_vertices = VERTICES.len() as u32;
-
-    
-    let index_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        }
-    );
-    let num_indices = INDICES.len() as u32;
         
     //Load loaders
     let mut diffuse_bind_group = None;
@@ -306,11 +255,14 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     surface.configure(&device, &config);
 
+    let screen = Mesh::get_rectangle(3840 as f32/1080 as f32, 1.0);
+    let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&device);
+
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
         // the resources are properly cleaned up.
-        let _ = (&instance, &adapter, &shader, &pipeline_layout, &vertex_buffer, &index_buffer, &diffuse_bind_group);
+        let _ = (&instance, &adapter, &shader, &pipeline_layout, &screen_vertex_buffer, &screen_index_buffer, &diffuse_bind_group);
         let start_time = Instant::now();
 
         *control_flow = ControlFlow::Wait;
@@ -357,9 +309,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         rpass.set_bind_group(0, bind_group, &[]);
                     }
 
-                    rpass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                    rpass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    rpass.draw_indexed(0..num_indices, 0, 0..1);
+                    rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
+                    rpass.set_index_buffer(screen_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                    rpass.draw_indexed(0..screen.indices(), 0, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
@@ -395,6 +347,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 fn main() {
     let event_loop = EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
+    window.set_inner_size(LogicalSize::new(3840,1080));
+    window.set_resizable(false);
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
