@@ -255,7 +255,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     surface.configure(&device, &config);
 
-    let screen = Mesh::get_rectangle(3840 as f32/1080 as f32, 1.0);
+    let screen = Mesh::get_rectangle(1.0, 1.0);
     let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&device);
 
     event_loop.run(move |event, _, control_flow| {
