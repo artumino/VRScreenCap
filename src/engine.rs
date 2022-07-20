@@ -1,6 +1,8 @@
 struct EngineContext {}
 
 pub mod geometry;
+pub mod camera;
+pub mod entity;
 
 impl EngineContext {
     pub fn new() -> Self {
