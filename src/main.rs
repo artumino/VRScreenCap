@@ -1,17 +1,17 @@
-use ash::{extensions::{khr::{Swapchain, ExternalMemoryWin32}, ext::DebugUtils}, vk, prelude::VkResult};
-use engine::geometry::{Vertex, self, Mesh};
+use ash::{vk, prelude::VkResult};
+use engine::geometry::{Vertex, Mesh};
 use loaders::Loader;
-use wgpu::{BindGroup, util::DeviceExt, Texture, TextureDescriptor};
+use wgpu::{TextureDescriptor};
 use wgpu_hal::{api::Vulkan, InstanceError};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::Window, dpi::LogicalSize,
+    window::Window, dpi::{PhysicalSize},
 };
 
 pub mod loaders;
 pub mod engine;
-use std::{borrow::Cow, ffi::{CStr, CString}, os::raw::c_char, slice, ops::Deref, time::Instant};
+use std::{borrow::Cow, ffi::{CStr}, slice, time::Instant};
 
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
 
@@ -160,8 +160,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     #[cfg(target_os = "windows")]
     {
         let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
-        if let Ok(texture) = cata.load(&instance, &device) {
-            screen_texture = texture;
+        if let Ok(tex_source) = cata.load(&instance, &device) {
+            window.set_inner_size(PhysicalSize::new(tex_source.width, tex_source.height));
+            screen_texture = tex_source.texture;
         }
     }
 
@@ -356,7 +357,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 fn main() {
     let event_loop = EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
-    window.set_inner_size(LogicalSize::new(3840,1080));
     window.set_resizable(false);
     #[cfg(not(target_arch = "wasm32"))]
     {

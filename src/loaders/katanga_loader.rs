@@ -1,55 +1,44 @@
-use std::{
-    error::Error,
-    ffi::{c_void, CString},
-    mem, ptr,
-};
+use std::{error::Error, ffi::c_void, ptr};
 
-use ash::{
-    extensions::khr::ExternalMemoryWin32,
-    vk::{self, DeviceMemory, ImageCreateInfo, PFN_vkGetMemoryWin32HandlePropertiesKHR},
-};
-use wgpu::{Device, Instance, Texture, TextureFormat, TextureUsages};
-use wgpu_hal::{api::Vulkan, auxil, MemoryFlags, TextureDescriptor, TextureUses};
+use ash::vk::{self, ImageCreateInfo};
+use wgpu::{Device, Instance, TextureFormat};
+use wgpu_hal::{api::Vulkan, MemoryFlags, TextureDescriptor, TextureUses};
 use windows::Win32::{
     Foundation::{CloseHandle, HANDLE},
     Graphics::{
         Direct3D::D3D_DRIVER_TYPE_HARDWARE,
         Direct3D11::{
-            D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-            D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+            D3D11CreateDevice, ID3D11Texture2D, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
+            D3D11_TEXTURE2D_DESC,
         },
-        Dxgi::{
-            Common::{
-                DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-                DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC1_UNORM_SRGB, DXGI_FORMAT_BC2_UNORM,
-                DXGI_FORMAT_BC2_UNORM_SRGB, DXGI_FORMAT_BC3_UNORM, DXGI_FORMAT_BC3_UNORM_SRGB,
-                DXGI_FORMAT_BC4_SNORM, DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC5_SNORM,
-                DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_BC6H_SF16, DXGI_FORMAT_BC6H_UF16,
-                DXGI_FORMAT_BC7_UNORM, DXGI_FORMAT_BC7_UNORM_SRGB, DXGI_FORMAT_D24_UNORM_S8_UINT,
-                DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT,
-                DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R11G11B10_FLOAT,
-                DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_SINT,
-                DXGI_FORMAT_R16G16B16A16_SNORM, DXGI_FORMAT_R16G16B16A16_UINT,
-                DXGI_FORMAT_R16G16B16A16_UNORM, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16_SINT,
-                DXGI_FORMAT_R16G16_SNORM, DXGI_FORMAT_R16G16_UINT, DXGI_FORMAT_R16G16_UNORM,
-                DXGI_FORMAT_R16_FLOAT, DXGI_FORMAT_R16_SINT, DXGI_FORMAT_R16_SNORM,
-                DXGI_FORMAT_R16_UINT, DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R32G32B32A32_FLOAT,
-                DXGI_FORMAT_R32G32B32A32_SINT, DXGI_FORMAT_R32G32B32A32_UINT,
-                DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32_SINT, DXGI_FORMAT_R32G32_UINT,
-                DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_SINT, DXGI_FORMAT_R32_UINT,
-                DXGI_FORMAT_R8G8B8A8_SINT, DXGI_FORMAT_R8G8B8A8_SNORM, DXGI_FORMAT_R8G8B8A8_UINT,
-                DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8_SINT,
-                DXGI_FORMAT_R8G8_SNORM, DXGI_FORMAT_R8G8_UINT, DXGI_FORMAT_R8G8_UNORM,
-                DXGI_FORMAT_R8_SINT, DXGI_FORMAT_R8_SNORM, DXGI_FORMAT_R8_UINT,
-                DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
-            },
-            CreateDXGIFactory,
+        Dxgi::Common::{
+            DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+            DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC1_UNORM_SRGB, DXGI_FORMAT_BC2_UNORM,
+            DXGI_FORMAT_BC2_UNORM_SRGB, DXGI_FORMAT_BC3_UNORM, DXGI_FORMAT_BC3_UNORM_SRGB,
+            DXGI_FORMAT_BC4_SNORM, DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC5_SNORM,
+            DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_BC6H_SF16, DXGI_FORMAT_BC6H_UF16,
+            DXGI_FORMAT_BC7_UNORM, DXGI_FORMAT_BC7_UNORM_SRGB, DXGI_FORMAT_D24_UNORM_S8_UINT,
+            DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R10G10B10A2_UNORM,
+            DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
+            DXGI_FORMAT_R16G16B16A16_SINT, DXGI_FORMAT_R16G16B16A16_SNORM,
+            DXGI_FORMAT_R16G16B16A16_UINT, DXGI_FORMAT_R16G16B16A16_UNORM,
+            DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16_SINT, DXGI_FORMAT_R16G16_SNORM,
+            DXGI_FORMAT_R16G16_UINT, DXGI_FORMAT_R16G16_UNORM, DXGI_FORMAT_R16_FLOAT,
+            DXGI_FORMAT_R16_SINT, DXGI_FORMAT_R16_SNORM, DXGI_FORMAT_R16_UINT,
+            DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32A32_SINT,
+            DXGI_FORMAT_R32G32B32A32_UINT, DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32_SINT,
+            DXGI_FORMAT_R32G32_UINT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_SINT,
+            DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R8G8B8A8_SINT, DXGI_FORMAT_R8G8B8A8_SNORM,
+            DXGI_FORMAT_R8G8B8A8_UINT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+            DXGI_FORMAT_R8G8_SINT, DXGI_FORMAT_R8G8_SNORM, DXGI_FORMAT_R8G8_UINT,
+            DXGI_FORMAT_R8G8_UNORM, DXGI_FORMAT_R8_SINT, DXGI_FORMAT_R8_SNORM, DXGI_FORMAT_R8_UINT,
+            DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
         },
     },
     System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS},
 };
 
-use super::Loader;
+use super::{Loader, TextureSource};
 
 pub struct KatangaLoaderContext {
     katanga_file_handle: HANDLE,
@@ -59,9 +48,9 @@ pub struct KatangaLoaderContext {
 impl Loader for KatangaLoaderContext {
     fn load(
         &mut self,
-        instance: &Instance,
+        _instance: &Instance,
         device: &Device,
-    ) -> Result<wgpu::Texture, Box<dyn Error>> {
+    ) -> Result<TextureSource, Box<dyn Error>> {
         self.katanga_file_handle =
             unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile")? };
         println!("Handle: {:?}", self.katanga_file_handle);
@@ -85,20 +74,18 @@ impl Loader for KatangaLoaderContext {
                     //let raw_phys_device = device.raw_physical_device();
                     let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT;
 
-                    let mut import_memory_info =
-                        vk::ImportMemoryWin32HandleInfoKHR::builder()
-                            .handle_type(handle_type)
-                            .handle(tex_handle);
+                    let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
+                        .handle_type(handle_type)
+                        .handle(tex_handle);
 
                     let allocate_info = vk::MemoryAllocateInfo::builder()
                         .push_next(&mut import_memory_info)
                         .memory_type_index(0);
 
-                    let allocated_memory =
-                        raw_device.allocate_memory(&allocate_info, None)?;
+                    let allocated_memory = raw_device.allocate_memory(&allocate_info, None)?;
 
-                    let mut ext_create_info = vk::ExternalMemoryImageCreateInfo::builder()
-                        .handle_types(handle_type);
+                    let mut ext_create_info =
+                        vk::ExternalMemoryImageCreateInfo::builder().handle_types(handle_type);
 
                     let image_create_info = ImageCreateInfo::builder()
                         .push_next(&mut ext_create_info)
@@ -150,7 +137,7 @@ impl Loader for KatangaLoaderContext {
                 )
             };
 
-            return Ok(unsafe {
+            let texture = unsafe {
                 device.create_texture_from_hal::<Vulkan>(
                     texture,
                     &wgpu::TextureDescriptor {
@@ -167,6 +154,13 @@ impl Loader for KatangaLoaderContext {
                         usage: wgpu::TextureUsages::TEXTURE_BINDING,
                     },
                 )
+            };
+
+            return Ok(TextureSource {
+                texture,
+                width: tex_info.width,
+                height: tex_info.height,
+                stereo_mode: crate::loaders::StereoMode::FSBS,
             });
         }
 
@@ -234,7 +228,7 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<D3D11TextureInfoAdapter, Box
     }?;
     let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
     unsafe { d3d11_texture.unwrap().GetDesc(&mut texture_desc) };
-    
+
     Ok(D3D11TextureInfoAdapter {
         width: texture_desc.Width,
         height: texture_desc.Height,
