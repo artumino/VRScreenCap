@@ -1,8 +1,12 @@
 use std::error::Error;
 
 use ash::vk::{Handle, self};
+use hal::{TextureUses, MemoryFlags};
 use openxr as xr;
+use wgpu::{TextureViewDescriptor, Extent3d, TextureViewDimension, TextureAspect, TextureView, Device, Instance, Adapter, Queue, TextureUsages};
 use wgpu_hal as hal;
+
+use crate::conversions::vulkan_image_to_texture;
 
 use super::{WgpuLoader, TARGET_VULKAN_VERSION, WgpuRunner};
 
@@ -65,7 +69,7 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
         instance,
         props,
         system,
-        blend_mode,
+        blend_mode
     })
 }
 
@@ -107,7 +111,6 @@ impl WgpuLoader for OpenXRContext {
         let queue_index = 0;
         let mut instance_extensions =
             <hal::api::Vulkan as hal::Api>::Instance::required_extensions(&vk_entry, flags).unwrap();
-
         let instance_extensions_ptrs = instance_extensions
             .iter()
             .map(|x| x.as_ptr())
@@ -177,7 +180,9 @@ impl WgpuLoader for OpenXRContext {
             .unwrap();
 
         
-        let device_descriptor = wgpu::DeviceDescriptor::default();
+        let device_descriptor = wgpu::DeviceDescriptor { 
+            features: wgpu::Features::MULTIVIEW, 
+            ..Default::default() };
         let device_extensions = hal_exposed_adapter
             .adapter
             .required_device_extensions(device_descriptor.features);
@@ -254,7 +259,11 @@ impl WgpuLoader for OpenXRContext {
             device: wgpu_device,
             physical_device: wgpu_adapter,
             queue: wgpu_queue,
-            surface_config: todo!()
+            queue_index: queue_family_index,
+            vk_device,
+            vk_entry,
+            vk_instance,
+            vk_phys_device: vk_physical_device
         })
     }
 }
@@ -262,5 +271,107 @@ impl WgpuLoader for OpenXRContext {
 impl WgpuRunner for OpenXRContext {
     fn run(&mut self, wgpu_context: &super::WgpuContext) {
         todo!()
+    }
+}
+
+impl OpenXRContext {
+    pub fn create_swapchain(
+        &self,
+        xr_session: &openxr::Session<openxr::Vulkan>,
+        device: &Device,
+    ) -> (
+        openxr::Swapchain<openxr::Vulkan>,
+        vk::Extent2D,
+        Vec<TextureView>,
+    ) {
+        println!("Creating OpenXR swapchain");
+    
+        // Fetch the views we need to render to (the eye screens on the HMD)
+        let views = self.instance
+            .enumerate_view_configuration_views(self.system, VIEW_TYPE)
+            .unwrap();
+        assert_eq!(views.len(), 2);
+        assert_eq!(views[0], views[1]);
+    
+        // Create the OpenXR swapchain
+        let color_format = vk::Format::B8G8R8A8_SRGB;
+        let resolution = vk::Extent2D {
+            width: views[0].recommended_image_rect_width,
+            height: views[0].recommended_image_rect_height,
+        };
+        let xr_swapchain = xr_session
+            .create_swapchain(&openxr::SwapchainCreateInfo {
+                create_flags: openxr::SwapchainCreateFlags::EMPTY,
+                usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                    | openxr::SwapchainUsageFlags::SAMPLED,
+                format: color_format.clone().as_raw() as _,
+                sample_count: 1,
+                width: resolution.width,
+                height: resolution.height,
+                face_count: 1,
+                array_size: 2,
+                mip_count: 1,
+            })
+            .unwrap();
+    
+        // Create image views for the swapchain
+        let image_views: Vec<_> = xr_swapchain
+            .enumerate_images()
+            .unwrap()
+            .into_iter()
+            .map(|image| {
+                // Create a WGPU image view for this image
+                let image = vulkan_image_to_texture(device, vk::Image::from_raw(image), 
+                    wgpu::TextureDescriptor { 
+                        label: None,
+                        size: Extent3d { 
+                            width: resolution.width, 
+                            height: resolution.height, 
+                            depth_or_array_layers: 2 
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        usage: TextureUsages::all(), //todo what here?
+                    },
+                    wgpu_hal::TextureDescriptor {
+                        label: None,
+                        size: Extent3d { 
+                            width: resolution.width, 
+                            height: resolution.height, 
+                            depth_or_array_layers: 2 
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        usage: TextureUses::all(), //todo what here?
+                        memory_flags: MemoryFlags::empty()
+                    });
+                image.create_view(&TextureViewDescriptor {
+                            label: None,
+                            format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                            dimension: Some(TextureViewDimension::D2Array),
+                            aspect: TextureAspect::All,
+                            base_mip_level: 0,
+                            mip_level_count: Some(1u32.try_into().unwrap()),
+                            base_array_layer: 0,
+                            array_layer_count: Some(2.try_into().unwrap()),
+                })
+                        //device.create_raw_vulkan_texture_view(
+                        //    ,
+                        //    vk::ImageViewType::TYPE_2D,
+                        //    ,
+                        //    Extent3d {
+                        //        width: resolution.width,
+                        //        height: resolution.height,
+                        //        depth_or_array_layers: 1,
+                        //    },
+                        //)
+            })
+            .collect();
+    
+        (xr_swapchain, resolution, image_views)
     }
 }

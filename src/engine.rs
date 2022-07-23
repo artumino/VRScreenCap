@@ -1,5 +1,5 @@
 use ash::vk;
-use wgpu::Texture;
+use wgpu::{Texture, TextureView};
 
 pub mod geometry;
 pub mod camera;
@@ -23,13 +23,15 @@ impl EngineContext {
 }
 
 pub struct WgpuContext {
+    pub vk_entry: ash::Entry,
+    pub vk_instance: ash::Instance,
+    pub vk_phys_device: ash::vk::PhysicalDevice,
+    pub queue_index: u32,
+    pub vk_device: ash::Device,
     pub instance: wgpu::Instance,
     pub device: wgpu::Device,
     pub physical_device: wgpu::Adapter,
     pub queue: wgpu::Queue,
-    pub surface_config: wgpu::SurfaceConfiguration,
-    pub frame_targets: Vec<Texture>,
-    pub frame_index: usize
 }
 
 pub trait WgpuLoader {

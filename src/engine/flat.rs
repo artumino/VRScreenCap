@@ -56,9 +56,7 @@ impl WgpuLoader for FlatContext {
             device,
             physical_device: adapter,
             queue,
-            surface_config: config,
-            frame_targets: vec![surface.get_current_texture().unwrap().texture],
-            frame_index: 0
+            ..todo!()
         })
     }
 }
@@ -66,187 +64,188 @@ impl WgpuLoader for FlatContext {
 impl WgpuRunner for FlatContext {
     fn run(&mut self, wgpu_context: &super::WgpuContext) {
         //Load loaders
-        let WgpuContext{instance, device, physical_device, queue, surface_config, frame_targets, frame_index} = wgpu_context;
-        let FlatContext{window, event_loop} = self;
-        
-        let mut bind_group_layouts = vec!();
-        let mut screen_texture = device.create_texture(&TextureDescriptor { 
-            label: "Blank".into(),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING, 
-        });
-        #[cfg(target_os = "windows")]
-        {
-            let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
-            if let Ok(tex_source) = cata.load(&instance, &device) {
-                window.set_inner_size(PhysicalSize::new(tex_source.width, tex_source.height));
-                screen_texture = tex_source.texture;
-            }
-        }
+        todo!();
+        //let WgpuContext{instance, device, physical_device, queue, surface_config, frame_targets, frame_index} = wgpu_context;
+        //let FlatContext{window, event_loop} = self;
+        //
+        //let mut bind_group_layouts = vec!();
+        //let mut screen_texture = device.create_texture(&TextureDescriptor { 
+        //    label: "Blank".into(),
+        //    size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        //    mip_level_count: 1,
+        //    sample_count: 1,
+        //    dimension: wgpu::TextureDimension::D2,
+        //    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        //    usage: wgpu::TextureUsages::TEXTURE_BINDING, 
+        //});
+        //#[cfg(target_os = "windows")]
+        //{
+        //    let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
+        //    if let Ok(tex_source) = cata.load(&instance, &device) {
+        //        window.set_inner_size(PhysicalSize::new(tex_source.width, tex_source.height));
+        //        screen_texture = tex_source.texture;
+        //    }
+        //}
 
-        // We don't need to configure the texture view much, so let's
-        // let wgpu define it.
-        let diffuse_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-        let texture_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    // This should match the filterable field of the
-                    // corresponding Texture entry above.
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-            label: Some("texture_bind_group_layout"),
-        });
+        //// We don't need to configure the texture view much, so let's
+        //// let wgpu define it.
+        //let diffuse_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        //let diffuse_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        //    address_mode_u: wgpu::AddressMode::ClampToEdge,
+        //    address_mode_v: wgpu::AddressMode::ClampToEdge,
+        //    address_mode_w: wgpu::AddressMode::ClampToEdge,
+        //    mag_filter: wgpu::FilterMode::Linear,
+        //    min_filter: wgpu::FilterMode::Nearest,
+        //    mipmap_filter: wgpu::FilterMode::Nearest,
+        //    ..Default::default()
+        //});
+        //let texture_bind_group_layout =
+        //device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        //    entries: &[
+        //        wgpu::BindGroupLayoutEntry {
+        //            binding: 0,
+        //            visibility: wgpu::ShaderStages::FRAGMENT,
+        //            ty: wgpu::BindingType::Texture {
+        //                multisampled: false,
+        //                view_dimension: wgpu::TextureViewDimension::D2,
+        //                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        //            },
+        //            count: None,
+        //        },
+        //        wgpu::BindGroupLayoutEntry {
+        //            binding: 1,
+        //            visibility: wgpu::ShaderStages::FRAGMENT,
+        //            // This should match the filterable field of the
+        //            // corresponding Texture entry above.
+        //            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        //            count: None,
+        //        },
+        //    ],
+        //    label: Some("texture_bind_group_layout"),
+        //});
 
-        let diffuse_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-                    }
-                ],
-                label: Some("diffuse_bind_group"),
-            }
-        );
+        //let diffuse_bind_group = device.create_bind_group(
+        //    &wgpu::BindGroupDescriptor {
+        //        layout: &texture_bind_group_layout,
+        //        entries: &[
+        //            wgpu::BindGroupEntry {
+        //                binding: 0,
+        //                resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+        //            },
+        //            wgpu::BindGroupEntry {
+        //                binding: 1,
+        //                resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+        //            }
+        //        ],
+        //        label: Some("diffuse_bind_group"),
+        //    }
+        //);
 
-        bind_group_layouts.push(texture_bind_group_layout);
+        //bind_group_layouts.push(texture_bind_group_layout);
 
-        // Load the shaders from disk
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shader.wgsl"))),
-        });
+        //// Load the shaders from disk
+        //let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        //    label: None,
+        //    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("../shader.wgsl"))),
+        //});
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: bind_group_layouts.iter().collect::<Vec<_>>().as_slice(),
-            push_constant_ranges: &[],
-        });
+        //let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        //    label: None,
+        //    bind_group_layouts: bind_group_layouts.iter().collect::<Vec<_>>().as_slice(),
+        //    push_constant_ranges: &[],
+        //});
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[
-                    Vertex::desc(),
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(surface_config.format.into())],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: NonZeroU32::new(2),
-        });
+        //let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        //    label: None,
+        //    layout: Some(&pipeline_layout),
+        //    vertex: wgpu::VertexState {
+        //        module: &shader,
+        //        entry_point: "vs_main",
+        //        buffers: &[
+        //            Vertex::desc(),
+        //        ],
+        //    },
+        //    fragment: Some(wgpu::FragmentState {
+        //        module: &shader,
+        //        entry_point: "fs_main",
+        //        targets: &[Some(surface_config.format.into())],
+        //    }),
+        //    primitive: wgpu::PrimitiveState::default(),
+        //    depth_stencil: None,
+        //    multisample: wgpu::MultisampleState::default(),
+        //    multiview: NonZeroU32::new(2),
+        //});
 
-        let screen = Mesh::get_rectangle(1.0, 1.0);
-        let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&device);
+        //let screen = Mesh::get_rectangle(1.0, 1.0);
+        //let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&device);
 
-        event_loop.run(move |event, _, control_flow| {
-            // Have the closure take ownership of the resources.
-            // `event_loop.run` never returns, therefore we must do this to ensure
-            // the resources are properly cleaned up.
-            let _ = (&instance, &physical_device, &shader, &pipeline_layout, &screen_vertex_buffer, &screen_index_buffer, &diffuse_bind_group);
-            let start_time = Instant::now();
+        //event_loop.run(move |event, _, control_flow| {
+        //    // Have the closure take ownership of the resources.
+        //    // `event_loop.run` never returns, therefore we must do this to ensure
+        //    // the resources are properly cleaned up.
+        //    let _ = (&instance, &physical_device, &shader, &pipeline_layout, &screen_vertex_buffer, &screen_index_buffer, &diffuse_bind_group);
+        //    let start_time = Instant::now();
 
-            *control_flow = ControlFlow::Wait;
-            match event {
-                Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                    *control_flow = ControlFlow::Exit;
-                },
-                Event::RedrawRequested(_) => {
-                    let frame = &frame_targets.get(*frame_index).unwrap();
-                    let view = frame
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                    {
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                        });
-                        rpass.set_pipeline(&render_pipeline);
+        //    *control_flow = ControlFlow::Wait;
+        //    match event {
+        //        Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+        //            *control_flow = ControlFlow::Exit;
+        //        },
+        //        Event::RedrawRequested(_) => {
+        //            let frame = &frame_targets.get(*frame_index).unwrap();
+        //            let view = frame
+        //                .create_view(&wgpu::TextureViewDescriptor::default());
+        //            let mut encoder =
+        //                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        //            {
+        //                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        //                    label: None,
+        //                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+        //                        view: &view,
+        //                        resolve_target: None,
+        //                        ops: wgpu::Operations {
+        //                            load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+        //                            store: true,
+        //                        },
+        //                    })],
+        //                    depth_stencil_attachment: None,
+        //                });
+        //                rpass.set_pipeline(&render_pipeline);
 
-                        rpass.set_bind_group(0, &diffuse_bind_group, &[]);
-                        rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
-                        rpass.set_index_buffer(screen_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                        rpass.draw_indexed(0..screen.indices(), 0, 0..1);
-                    }
+        //                rpass.set_bind_group(0, &diffuse_bind_group, &[]);
+        //                rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
+        //                rpass.set_index_buffer(screen_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        //                rpass.draw_indexed(0..screen.indices(), 0, 0..1);
+        //            }
 
-                    queue.submit(Some(encoder.finish()));
-                    frame.present();
-                },
-                _ => {}
-            }
+        //            queue.submit(Some(encoder.finish()));
+        //            frame.present();
+        //        },
+        //        _ => {}
+        //    }
 
-            match *control_flow {
-                ControlFlow::Exit => (),
-                _ => {
-                    /*
-                    * Grab window handle from the display (untested - based on API)
-                    */
-                    window.request_redraw();
-                    /*
-                    * Below logic to attempt hitting TARGET_FPS.
-                    * Basically, sleep for the rest of our milliseconds
-                    */
-                    let elapsed_time = Instant::now().duration_since(start_time).as_millis() as u64;
-        
-                    let wait_millis = match 1000 / TARGET_FPS >= elapsed_time {
-                        true => 1000 / TARGET_FPS - elapsed_time,
-                        false => 0
-                    };
-                    let new_inst = start_time + std::time::Duration::from_millis(wait_millis);
-                    *control_flow = ControlFlow::WaitUntil(new_inst);
-                }
-            }
-        });
+        //    match *control_flow {
+        //        ControlFlow::Exit => (),
+        //        _ => {
+        //            /*
+        //            * Grab window handle from the display (untested - based on API)
+        //            */
+        //            window.request_redraw();
+        //            /*
+        //            * Below logic to attempt hitting TARGET_FPS.
+        //            * Basically, sleep for the rest of our milliseconds
+        //            */
+        //            let elapsed_time = Instant::now().duration_since(start_time).as_millis() as u64;
+        //
+        //            let wait_millis = match 1000 / TARGET_FPS >= elapsed_time {
+        //                true => 1000 / TARGET_FPS - elapsed_time,
+        //                false => 0
+        //            };
+        //            let new_inst = start_time + std::time::Duration::from_millis(wait_millis);
+        //            *control_flow = ControlFlow::WaitUntil(new_inst);
+        //        }
+        //    }
+        //});
     }
 }
 
