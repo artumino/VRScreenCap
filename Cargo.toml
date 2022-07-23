@@ -15,6 +15,7 @@ pollster = "0.2"
 env_logger = "0.9"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
+openxr = { version = "0.16.0", features=["static"] }
 bytemuck = { version = "1.10.0", features = [ "derive" ] }
 
 

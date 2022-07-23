@@ -355,6 +355,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 }
 
 fn main() {
+
+    if let Ok(xr_context) = engine::vr::enable_xr_runtime() {
+        println!("OpenXR OK");
+    }
+
     let event_loop = EventLoop::new();
     let window = winit::window::Window::new(&event_loop).unwrap();
     window.set_resizable(false);
