@@ -4,7 +4,7 @@ use ash::vk::{Handle, self};
 use openxr as xr;
 use wgpu_hal as hal;
 
-use super::WgpuLoader;
+use super::{WgpuLoader, TARGET_VULKAN_VERSION, WgpuRunner};
 
 pub struct OpenXRContext {
     pub instance: openxr::Instance,
@@ -74,7 +74,7 @@ impl WgpuLoader for OpenXRContext {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
 
-        let vk_target_version = vk::make_api_version(0, 1, 1, 0); // Vulkan 1.1 guarantees multiview support
+        let vk_target_version = TARGET_VULKAN_VERSION; // Vulkan 1.1 guarantees multiview support
         let vk_target_version_xr = xr::Version::new(1, 1, 0);
 
         let reqs = self.instance
@@ -254,32 +254,13 @@ impl WgpuLoader for OpenXRContext {
             device: wgpu_device,
             physical_device: wgpu_adapter,
             queue: wgpu_queue,
-            queue_family_index,
-            queue_index,
+            surface_config: todo!()
         })
     }
 }
-pub unsafe fn create_ash_instance(context: &OpenXRContext, entry: &ash::Entry, vk_target_version: u32) -> ash::Instance {
-    
-    let vk_app_info = vk::ApplicationInfo::builder()
-        .application_version(0)
-        .engine_version(0)
-        .api_version(vk_target_version);
 
-    let vk_instance = context.instance
-        .create_vulkan_instance(
-            context.system,
-            std::mem::transmute(entry.static_fn().get_instance_proc_addr),
-            &vk::InstanceCreateInfo::builder().application_info(&vk_app_info) as *const _
-                as *const _,
-        )
-        .expect("XR error creating Vulkan instance")
-        .map_err(vk::Result::from_raw)
-        .expect("Vulkan error creating Vulkan instance");
-
-    ash::Instance::load(
-        entry.static_fn(),
-        ash::vk::Instance::from_raw(vk_instance as _),
-    )
+impl WgpuRunner for OpenXRContext {
+    fn run(&mut self, wgpu_context: &super::WgpuContext) {
+        todo!()
+    }
 }
-
