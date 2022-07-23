@@ -11,7 +11,7 @@ use winit::{
 
 pub mod loaders;
 pub mod engine;
-use std::{borrow::Cow, ffi::{CStr}, slice, time::Instant};
+use std::{borrow::Cow, ffi::{CStr}, slice, time::Instant, num::NonZeroU32};
 
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
 
@@ -254,7 +254,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+        multiview: NonZeroU32::new(2),
     });
 
     let mut config = wgpu::SurfaceConfiguration {
@@ -318,7 +318,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     rpass.set_pipeline(&render_pipeline);
 
                     rpass.set_bind_group(0, &diffuse_bind_group, &[]);
-
                     rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
                     rpass.set_index_buffer(screen_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     rpass.draw_indexed(0..screen.indices(), 0, 0..1);
