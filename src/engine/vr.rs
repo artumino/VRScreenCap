@@ -1,24 +1,25 @@
 use std::error::Error;
 
-use ash::vk::{Handle, self};
-use hal::{TextureUses, MemoryFlags};
+use ash::vk::{self, Handle};
+use hal::{MemoryFlags, TextureUses};
 use openxr as xr;
-use wgpu::{TextureViewDescriptor, Extent3d, TextureViewDimension, TextureAspect, TextureView, Device, Instance, Adapter, Queue, TextureUsages};
+use wgpu::{
+    Device, Extent3d, TextureAspect, TextureUsages, TextureView, TextureViewDescriptor,
+    TextureViewDimension,
+};
 use wgpu_hal as hal;
 
 use crate::conversions::vulkan_image_to_texture;
 
-use super::{WgpuLoader, TARGET_VULKAN_VERSION, WgpuRunner};
+use super::{WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION};
 
 pub struct OpenXRContext {
     pub instance: openxr::Instance,
     pub props: openxr::InstanceProperties,
     pub system: openxr::SystemId,
-    pub blend_mode: openxr::EnvironmentBlendMode
+    pub blend_mode: openxr::EnvironmentBlendMode,
 }
 
-pub const COLOR_FORMAT: ash::vk::Format = ash::vk::Format::R8G8B8A8_SRGB;
-pub const VIEW_COUNT: u32 = 2;
 const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 
 pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
@@ -38,17 +39,16 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
         enabled_extensions.khr_android_create_instance = true;
     }
 
-    let instance = entry
-        .create_instance(
-            &openxr::ApplicationInfo {
-                application_name: "VR Screen Viewer",
-                application_version: 0,
-                engine_name: "void*",
-                engine_version: 0,
-            },
-            &enabled_extensions,
-            &[],
-        )?;
+    let instance = entry.create_instance(
+        &openxr::ApplicationInfo {
+            application_name: "VR Screen Viewer",
+            application_version: 0,
+            engine_name: "void*",
+            engine_version: 0,
+        },
+        &enabled_extensions,
+        &[],
+    )?;
 
     let props = instance.properties()?;
     println!(
@@ -57,19 +57,17 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     );
 
     // Request a form factor from the device (HMD, Handheld, etc.)
-    let system = instance
-        .system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
+    let system = instance.system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
 
     // Check what blend mode is valid for this device (opaque vs transparent displays). We'll just
     // take the first one available!
-    let blend_mode = instance
-        .enumerate_environment_blend_modes(system, VIEW_TYPE)?[0];
-    
+    let blend_mode = instance.enumerate_environment_blend_modes(system, VIEW_TYPE)?[0];
+
     Ok(OpenXRContext {
         instance,
         props,
         system,
-        blend_mode
+        blend_mode,
     })
 }
 
@@ -81,7 +79,8 @@ impl WgpuLoader for OpenXRContext {
         let vk_target_version = TARGET_VULKAN_VERSION; // Vulkan 1.1 guarantees multiview support
         let vk_target_version_xr = xr::Version::new(1, 1, 0);
 
-        let reqs = self.instance
+        let reqs = self
+            .instance
             .graphics_requirements::<xr::Vulkan>(self.system)
             .unwrap();
 
@@ -109,8 +108,9 @@ impl WgpuLoader for OpenXRContext {
         }
 
         let queue_index = 0;
-        let mut instance_extensions =
-            <hal::api::Vulkan as hal::Api>::Instance::required_extensions(&vk_entry, flags).unwrap();
+        let instance_extensions =
+            <hal::api::Vulkan as hal::Api>::Instance::required_extensions(&vk_entry, flags)
+                .unwrap();
         let instance_extensions_ptrs = instance_extensions
             .iter()
             .map(|x| x.as_ptr())
@@ -121,12 +121,12 @@ impl WgpuLoader for OpenXRContext {
             .enabled_extension_names(&instance_extensions_ptrs);
 
         let vk_instance = unsafe {
-            let vk_instance = self.instance
+            let vk_instance = self
+                .instance
                 .create_vulkan_instance(
                     self.system,
                     std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
-                    &create_info as *const _
-                        as *const _,
+                    &create_info as *const _ as *const _,
                 )
                 .expect("XR error creating Vulkan instance")
                 .map_err(vk::Result::from_raw)
@@ -143,24 +143,26 @@ impl WgpuLoader for OpenXRContext {
                 .unwrap() as _,
         );
 
-        let vk_device_properties = unsafe { vk_instance.get_physical_device_properties(vk_physical_device) };
+        let vk_device_properties =
+            unsafe { vk_instance.get_physical_device_properties(vk_physical_device) };
         if vk_device_properties.api_version < vk_target_version {
             unsafe { vk_instance.destroy_instance(None) };
             panic!("Vulkan phyiscal device doesn't support version 1.1");
         }
 
-        let queue_family_index = unsafe { vk_instance
-            .get_physical_device_queue_family_properties(vk_physical_device)
-            .into_iter()
-            .enumerate()
-            .find_map(|(queue_family_index, info)| {
-                if info.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-                    Some(queue_family_index as u32)
-                } else {
-                    None
-                }
-            })
-            .expect("Vulkan device has no graphics queue")
+        let queue_family_index = unsafe {
+            vk_instance
+                .get_physical_device_queue_family_properties(vk_physical_device)
+                .into_iter()
+                .enumerate()
+                .find_map(|(queue_family_index, info)| {
+                    if info.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
+                        Some(queue_family_index as u32)
+                    } else {
+                        None
+                    }
+                })
+                .expect("Vulkan device has no graphics queue")
         };
 
         let hal_instance = unsafe {
@@ -173,16 +175,15 @@ impl WgpuLoader for OpenXRContext {
                 flags,
                 false, //TODO: is this correct?
                 None,
-            ).unwrap()
+            )
+            .unwrap()
         };
-        let hal_exposed_adapter = hal_instance
-            .expose_adapter(vk_physical_device)
-            .unwrap();
+        let hal_exposed_adapter = hal_instance.expose_adapter(vk_physical_device).unwrap();
 
-        
-        let device_descriptor = wgpu::DeviceDescriptor { 
-            features: wgpu::Features::MULTIVIEW, 
-            ..Default::default() };
+        let device_descriptor = wgpu::DeviceDescriptor {
+            features: wgpu::Features::MULTIVIEW,
+            ..Default::default()
+        };
         let device_extensions = hal_exposed_adapter
             .adapter
             .required_device_extensions(device_descriptor.features);
@@ -221,13 +222,16 @@ impl WgpuLoader for OpenXRContext {
             let info = physical_features.add_to_device_create_builder(info).build();
 
             unsafe {
-                let vk_device = self.instance
+                let vk_device = self
+                    .instance
                     .create_vulkan_device(
                         self.system,
                         std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
                         vk_physical_device.as_raw() as _,
                         &info as *const _ as *const _,
-                    ).unwrap().unwrap();
+                    )
+                    .unwrap()
+                    .unwrap();
 
                 ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
             }
@@ -244,14 +248,17 @@ impl WgpuLoader for OpenXRContext {
                     uab_types,
                     queue_family_index,
                     queue_index,
-                ).unwrap()
+                )
+                .unwrap()
         };
 
-        let wgpu_instance = unsafe { wgpu::Instance::from_hal::<wgpu_hal::api::Vulkan>(hal_instance) };
+        let wgpu_instance =
+            unsafe { wgpu::Instance::from_hal::<wgpu_hal::api::Vulkan>(hal_instance) };
         let wgpu_adapter = unsafe { wgpu_instance.create_adapter_from_hal(hal_exposed_adapter) };
         let (wgpu_device, wgpu_queue) = unsafe {
             wgpu_adapter
-                .create_device_from_hal(hal_device, &device_descriptor, None).unwrap()
+                .create_device_from_hal(hal_device, &device_descriptor, None)
+                .unwrap()
         };
 
         Some(super::WgpuContext {
@@ -263,13 +270,13 @@ impl WgpuLoader for OpenXRContext {
             vk_device,
             vk_entry,
             vk_instance,
-            vk_phys_device: vk_physical_device
+            vk_phys_device: vk_physical_device,
         })
     }
 }
 
 impl WgpuRunner for OpenXRContext {
-    fn run(&mut self, wgpu_context: &super::WgpuContext) {
+    fn run(&mut self, _wgpu_context: &super::WgpuContext) {
         todo!()
     }
 }
@@ -285,14 +292,15 @@ impl OpenXRContext {
         Vec<TextureView>,
     ) {
         println!("Creating OpenXR swapchain");
-    
+
         // Fetch the views we need to render to (the eye screens on the HMD)
-        let views = self.instance
+        let views = self
+            .instance
             .enumerate_view_configuration_views(self.system, VIEW_TYPE)
             .unwrap();
         assert_eq!(views.len(), 2);
         assert_eq!(views[0], views[1]);
-    
+
         // Create the OpenXR swapchain
         let color_format = vk::Format::B8G8R8A8_SRGB;
         let resolution = vk::Extent2D {
@@ -313,7 +321,7 @@ impl OpenXRContext {
                 mip_count: 1,
             })
             .unwrap();
-    
+
         // Create image views for the swapchain
         let image_views: Vec<_> = xr_swapchain
             .enumerate_images()
@@ -321,13 +329,15 @@ impl OpenXRContext {
             .into_iter()
             .map(|image| {
                 // Create a WGPU image view for this image
-                let image = vulkan_image_to_texture(device, vk::Image::from_raw(image), 
-                    wgpu::TextureDescriptor { 
+                let image = vulkan_image_to_texture(
+                    device,
+                    vk::Image::from_raw(image),
+                    wgpu::TextureDescriptor {
                         label: None,
-                        size: Extent3d { 
-                            width: resolution.width, 
-                            height: resolution.height, 
-                            depth_or_array_layers: 2 
+                        size: Extent3d {
+                            width: resolution.width,
+                            height: resolution.height,
+                            depth_or_array_layers: 2,
                         },
                         mip_level_count: 1,
                         sample_count: 1,
@@ -337,41 +347,32 @@ impl OpenXRContext {
                     },
                     wgpu_hal::TextureDescriptor {
                         label: None,
-                        size: Extent3d { 
-                            width: resolution.width, 
-                            height: resolution.height, 
-                            depth_or_array_layers: 2 
+                        size: Extent3d {
+                            width: resolution.width,
+                            height: resolution.height,
+                            depth_or_array_layers: 2,
                         },
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
                         format: wgpu::TextureFormat::Bgra8UnormSrgb,
                         usage: TextureUses::all(), //todo what here?
-                        memory_flags: MemoryFlags::empty()
-                    });
+                        memory_flags: MemoryFlags::empty(),
+                    },
+                );
                 image.create_view(&TextureViewDescriptor {
-                            label: None,
-                            format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                            dimension: Some(TextureViewDimension::D2Array),
-                            aspect: TextureAspect::All,
-                            base_mip_level: 0,
-                            mip_level_count: Some(1u32.try_into().unwrap()),
-                            base_array_layer: 0,
-                            array_layer_count: Some(2.try_into().unwrap()),
+                    label: None,
+                    format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                    dimension: Some(TextureViewDimension::D2Array),
+                    aspect: TextureAspect::All,
+                    base_mip_level: 0,
+                    mip_level_count: Some(1u32.try_into().unwrap()),
+                    base_array_layer: 0,
+                    array_layer_count: Some(2.try_into().unwrap()),
                 })
-                        //device.create_raw_vulkan_texture_view(
-                        //    ,
-                        //    vk::ImageViewType::TYPE_2D,
-                        //    ,
-                        //    Extent3d {
-                        //        width: resolution.width,
-                        //        height: resolution.height,
-                        //        depth_or_array_layers: 1,
-                        //    },
-                        //)
             })
             .collect();
-    
+
         (xr_swapchain, resolution, image_views)
     }
 }

@@ -1,22 +1,14 @@
-use ash::vk::{self, Handle};
-use cgmath::Deg;
+#![windows_subsystem = "windows"]
+use ash::vk::Handle;
 use engine::{
+    camera::{Camera, CameraUniform},
     geometry::Vertex,
-    vr::{enable_xr_runtime, OpenXRContext},
-    WgpuLoader, camera::{Camera, CameraUniform},
+    vr::enable_xr_runtime,
+    WgpuLoader,
 };
-use openxr::sys::create_swapchain;
-use std::{borrow::Cow, convert::TryInto, num::NonZeroU32, sync::Arc};
-use wgpu::{
-    Adapter, ColorTargetState, Device, Extent3d, Instance, Queue, ShaderSource, TextureAspect,
-    TextureDescriptor, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, util::DeviceExt,
-};
-use winit::{
-    dpi::PhysicalSize,
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::Window,
-};
+use std::{borrow::Cow, num::NonZeroU32, sync::mpsc};
+use tray_item::TrayItem;
+use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
 
 use crate::{engine::geometry::Mesh, loaders::Loader};
 
@@ -24,11 +16,22 @@ mod conversions;
 mod engine;
 mod loaders;
 
-fn main() {
-    pollster::block_on(run());
+enum Messages {
+    Quit,
 }
 
-async fn run() {
+fn main() {
+    let (tx, rx) = mpsc::channel();
+    let mut tray = TrayItem::new("VR Screen Viewer", "tray-icon").unwrap();
+    tray.add_menu_item("Quit", move || {
+        tx.send(Messages::Quit).unwrap();
+    })
+    .unwrap();
+    
+    pollster::block_on(run(&rx));
+}
+
+async fn run(event_receiver: &mpsc::Receiver<Messages>) {
     let mut xr_context = enable_xr_runtime().unwrap();
     let wgpu_context = xr_context.load_wgpu().unwrap();
 
@@ -65,7 +68,7 @@ async fn run() {
         let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
         if let Ok(tex_source) = cata.load(&wgpu_context.instance, &wgpu_context.device) {
             screen_texture = tex_source.texture;
-            aspect_ratio = (tex_source.width as f32/2.0) / tex_source.height as f32;
+            aspect_ratio = (tex_source.width as f32 / 2.0) / tex_source.height as f32;
         }
     }
 
@@ -123,7 +126,7 @@ async fn run() {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-                }
+                },
             ],
             label: Some("diffuse_bind_group"),
         });
@@ -132,40 +135,41 @@ async fn run() {
     let mut cameras = vec![Camera::default(), Camera::default()];
     let mut camera_uniform = vec![CameraUniform::new(), CameraUniform::new()];
 
-    let camera_buffer = wgpu_context.device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
+    let camera_buffer = wgpu_context
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(camera_uniform.as_slice()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        }
-    );
+        });
 
-    let camera_bind_group_layout = wgpu_context.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }
-        ],
-        label: Some("camera_bind_group_layout"),
-    });
+    let camera_bind_group_layout =
+        wgpu_context
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            });
 
-    let camera_bind_group = wgpu_context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &camera_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
+    let camera_bind_group = wgpu_context
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
-            }
-        ],
-        label: Some("camera_bind_group"),
-    });
+            }],
+            label: Some("camera_bind_group"),
+        });
 
     bind_group_layouts.push(camera_bind_group_layout);
 
@@ -343,7 +347,11 @@ async fn run() {
                         camera_uniform.update_view_proj(eye);
                         view_idx += 1;
                     }
-                    wgpu_context.queue.write_buffer(&camera_buffer, 0, bytemuck::cast_slice(camera_uniform.as_slice()));
+                    wgpu_context.queue.write_buffer(
+                        &camera_buffer,
+                        0,
+                        bytemuck::cast_slice(camera_uniform.as_slice()),
+                    );
                     wgpu_context.queue.submit(Some(encoder.finish()));
                     xr_swapchain.release_image().unwrap();
 
@@ -385,6 +393,13 @@ async fn run() {
                         .unwrap();
                 }
             }
+        }
+
+        match event_receiver.try_recv() {
+            Ok(Messages::Quit) => {
+                return;
+            }
+            _ => {}
         }
     }
 }

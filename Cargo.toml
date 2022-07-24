@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 wgpu = "0.13.1"
 wgpu-hal = { version = "0.13.1", features = ["vulkan"] }
-ash = "0.37.0+1.3.209"
+ash = "0.37.0"
 ash-window = "0.10.0"
 winit = "0.26"
 pollster = "0.2"
@@ -17,7 +17,7 @@ mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
 openxr = { version = "0.16.0", features=["static"] }
 bytemuck = { version = "1.10.0", features = [ "derive" ] }
-
+tray-item = "0.7.0"
 
 [dependencies.windows]
 version = "0.38.0"
@@ -31,3 +31,6 @@ features = [
     "Win32_Graphics_Direct3D", 
     "Win32_Graphics_Dxgi"
 ]
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

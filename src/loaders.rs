@@ -11,6 +11,7 @@ pub struct TextureSource {
     pub stereo_mode: StereoMode,
 }
 
+#[allow(unused)]
 pub enum StereoMode {
     Mono,
     SBS,

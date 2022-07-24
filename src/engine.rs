@@ -1,26 +1,13 @@
 use ash::vk;
-use wgpu::{Texture, TextureView};
 
 pub mod geometry;
 pub mod camera;
 pub mod entity;
 pub mod vr;
-pub mod flat;
-
 
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
 
-struct EngineContext {}
-
-impl EngineContext {
-    pub fn new() -> Self {
-        EngineContext {}
-    }
-
-    pub fn run(&mut self) {
-        
-    }
-}
+//TODO: Actually modularize engine...
 
 pub struct WgpuContext {
     pub vk_entry: ash::Entry,
