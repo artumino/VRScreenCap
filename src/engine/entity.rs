@@ -38,9 +38,9 @@ impl Entity {
     }
     
     pub fn update_matrices(&mut self, registry: &[Entity]) {
-        self.local_matrix = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z)
+        self.local_matrix = Matrix4::from_translation(self.position)
             * Matrix4::from(self.rotation)
-            * Matrix4::from_translation(self.position);
+            * Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
         
         if let Some(parent_id) = self.parent_id {
             self.world_matrix = registry[parent_id].world_matrix * self.local_matrix;

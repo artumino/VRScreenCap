@@ -23,42 +23,19 @@ impl Default for Camera {
 
 impl Camera {
     pub fn update_projection_from_tangents(&mut self, fov: Fovf){
-        // =============================================================================
-        // math code adapted from
-        // https://github.com/KhronosGroup/OpenXR-SDK-Source/blob/master/src/common/xr_linear.h
-        // Copyright (c) 2017 The Khronos Group Inc.
-        // Copyright (c) 2016 Oculus VR, LLC.
-        // SPDX-License-Identifier: Apache-2.0
-        // =============================================================================
+        let tan_right = fov.angle_right.tan();
+        let tan_left = fov.angle_left.tan();
+        let tan_top = fov.angle_up.tan();
+        let tan_bottom = fov.angle_down.tan();
+        let tan_angle_width = tan_right - tan_left;
+        let tan_angle_height = tan_top - tan_bottom;
 
-        let near_z = self.near;
-        let far_z = self.far; 
-
-        let tan_angle_left = fov.angle_left.tan();
-        let tan_angle_right = fov.angle_right.tan();
-
-        let tan_angle_down = fov.angle_down.tan();
-        let tan_angle_up = fov.angle_up.tan();
-
-        let tan_angle_width = tan_angle_right - tan_angle_left;
-
-        // Set to tanAngleDown - tanAngleUp for a clip space with positive Y
-        // down (Vulkan). Set to tanAngleUp - tanAngleDown for a clip space with
-        // positive Y up (OpenGL / D3D / Metal).
-        // const float tanAngleHeight =
-        //     graphicsApi == GRAPHICS_VULKAN ? (tanAngleDown - tanAngleUp) : (tanAngleUp - tanAngleDown);
-        let tan_angle_height = tan_angle_up - tan_angle_down;
-
-        // Set to nearZ for a [-1,1] Z clip space (OpenGL / OpenGL ES).
-        // Set to zero for a [0,1] Z clip space (Vulkan / D3D / Metal).
-        let offset_z = near_z;
-
-        // normal projection
-        self.projection = Matrix4::new(2. / tan_angle_width, 0., (tan_angle_right + tan_angle_left) / tan_angle_width, 0., 
-        0., 2. / tan_angle_height, (tan_angle_up + tan_angle_down) / tan_angle_height, 0., 
-        0., 0., -(far_z + offset_z) / (far_z - near_z), -(far_z * (near_z + offset_z)) / (far_z - near_z), 
-        0., 0., -1., 0.);
-        self.projection.transpose_self();
+        self.projection = Matrix4::new(
+            2.0 / tan_angle_width,                    0.0,                                       0.0,        0.0,
+            0.0,                                      2.0 / tan_angle_height,                    0.0,        0.0,
+            (tan_right + tan_left) / tan_angle_width, (tan_top + tan_bottom) / tan_angle_height, -1.0,       -1.0,
+            0.0,                                      0.0,                                       -self.near, 0.0
+        );
     }
 
     pub fn update_projection(&mut self, fov: Rad<f32>, aspect_ratio: f32) {
@@ -66,7 +43,7 @@ impl Camera {
     }
 
     pub fn build_view_projection_matrix(&self) -> Matrix4<f32> {
-        OPENGL_TO_WGPU_MATRIX * self.projection * self.entity.world_matrix.invert().unwrap()
+        self.projection * self.entity.world_matrix.invert().unwrap()
         //OPENGL_TO_WGPU_MATRIX * self.entity.world_matrix.invert().unwrap() * self.projection
     }
 }
