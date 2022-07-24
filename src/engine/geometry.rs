@@ -45,14 +45,14 @@ impl Mesh {
         self.indices.len() as u32
     }
 
-    pub fn get_rectangle(aspect_ratio: f32, scale: f32) -> Mesh {
+    pub fn get_rectangle(aspect_ratio: f32, scale: f32, distance: f32) -> Mesh {
         Mesh {
             //FIXME: Handle flipping properly
             vertices: vec![
-                Vertex { position: [-1.0*scale*aspect_ratio, -1.0*scale, 0.0*scale], tex_coords: [0.0, 1.0] },
-                Vertex { position: [-1.0*scale*aspect_ratio, 1.0*scale, 0.0*scale], tex_coords: [0.0, 0.0] },
-                Vertex { position: [1.0*scale*aspect_ratio, 1.0*scale, 0.0*scale], tex_coords: [1.0, 0.0] },
-                Vertex { position: [1.0*scale*aspect_ratio, -1.0*scale, 0.0*scale], tex_coords: [1.0, 1.0] }
+                Vertex { position: [-1.0*scale*aspect_ratio, -1.0*scale, distance], tex_coords: [0.0, 1.0] },
+                Vertex { position: [-1.0*scale*aspect_ratio, 1.0*scale, distance], tex_coords: [0.0, 0.0] },
+                Vertex { position: [1.0*scale*aspect_ratio, 1.0*scale, distance], tex_coords: [1.0, 0.0] },
+                Vertex { position: [1.0*scale*aspect_ratio, -1.0*scale, distance], tex_coords: [1.0, 1.0] }
             ],
             indices: QUAD_INDICES.to_vec(),
         }

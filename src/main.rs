@@ -1,14 +1,15 @@
 use ash::vk::{self, Handle};
+use cgmath::Deg;
 use engine::{
     geometry::Vertex,
     vr::{enable_xr_runtime, OpenXRContext},
-    WgpuLoader,
+    WgpuLoader, camera::{Camera, CameraUniform},
 };
 use openxr::sys::create_swapchain;
 use std::{borrow::Cow, convert::TryInto, num::NonZeroU32, sync::Arc};
 use wgpu::{
     Adapter, ColorTargetState, Device, Extent3d, Instance, Queue, ShaderSource, TextureAspect,
-    TextureDescriptor, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
+    TextureDescriptor, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, util::DeviceExt,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -68,7 +69,7 @@ async fn run() {
         }
     }
 
-    let screen = Mesh::get_rectangle(aspect_ratio, 1.0);
+    let screen = Mesh::get_rectangle(aspect_ratio, 10.0, -20.0);
     let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
 
     let diffuse_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -79,7 +80,7 @@ async fn run() {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -127,6 +128,46 @@ async fn run() {
             label: Some("diffuse_bind_group"),
         });
     bind_group_layouts.push(texture_bind_group_layout);
+
+    let mut cameras = vec![Camera::default(), Camera::default()];
+    let mut camera_uniform = vec![CameraUniform::new(), CameraUniform::new()];
+
+    let camera_buffer = wgpu_context.device.create_buffer_init(
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(camera_uniform.as_slice()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        }
+    );
+
+    let camera_bind_group_layout = wgpu_context.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }
+        ],
+        label: Some("camera_bind_group_layout"),
+    });
+
+    let camera_bind_group = wgpu_context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: &camera_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }
+        ],
+        label: Some("camera_bind_group"),
+    });
+
+    bind_group_layouts.push(camera_bind_group_layout);
 
     let pipeline_layout =
         wgpu_context
@@ -259,7 +300,7 @@ async fn run() {
                                 view: muti_view,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                                     store: true,
                                 },
                             })],
@@ -268,6 +309,7 @@ async fn run() {
                         rpass.set_pipeline(&render_pipeline);
 
                         rpass.set_bind_group(0, &diffuse_bind_group, &[]);
+                        rpass.set_bind_group(1, &camera_bind_group, &[]);
                         rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
                         rpass.set_index_buffer(
                             screen_index_buffer.slice(..),
@@ -285,7 +327,23 @@ async fn run() {
                     let (_, views) = xr_session
                         .locate_views(VIEW_TYPE, xr_frame_state.predicted_display_time, &stage)
                         .unwrap();
-
+                    let mut view_idx = 0;
+                    for view in views.iter() {
+                        let mut eye = cameras.get_mut(view_idx).unwrap();
+                        eye.entity.position.x = view.pose.position.x;
+                        eye.entity.position.y = view.pose.position.y;
+                        eye.entity.position.z = view.pose.position.z;
+                        eye.entity.rotation.v.x = view.pose.orientation.x;
+                        eye.entity.rotation.v.y = view.pose.orientation.y;
+                        eye.entity.rotation.v.z = view.pose.orientation.z;
+                        eye.entity.rotation.s = view.pose.orientation.w;
+                        eye.entity.update_matrices(&[]);
+                        eye.update_projection_from_tangents(view.fov);
+                        let camera_uniform = camera_uniform.get_mut(view_idx).unwrap();
+                        camera_uniform.update_view_proj(eye);
+                        view_idx += 1;
+                    }
+                    wgpu_context.queue.write_buffer(&camera_buffer, 0, bytemuck::cast_slice(camera_uniform.as_slice()));
                     wgpu_context.queue.submit(Some(encoder.finish()));
                     xr_swapchain.release_image().unwrap();
 

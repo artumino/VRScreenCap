@@ -1,4 +1,4 @@
-use cgmath::{Vector3, Quaternion, Matrix4, SquareMatrix};
+use cgmath::{Vector3, Quaternion, Matrix4, SquareMatrix, Zero};
 
 pub struct Entity {
     pub id: usize,
@@ -8,6 +8,20 @@ pub struct Entity {
     pub scale: Vector3<f32>,
     pub world_matrix: Matrix4<f32>,
     pub local_matrix: Matrix4<f32>
+}
+
+impl Default for Entity {
+    fn default() -> Self {
+        Self { 
+            id: Default::default(), //TODO registry
+            parent_id: None, 
+            position: Vector3::<f32>::zero(), 
+            rotation: Quaternion::<f32>::zero(), 
+            scale: Vector3::<f32>::new(1.0, 1.0, 1.0), 
+            world_matrix: Matrix4::identity(),
+            local_matrix: Matrix4::identity()
+        }
+    }
 }
 
 impl Entity {
