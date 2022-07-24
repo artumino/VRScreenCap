@@ -23,7 +23,11 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     out.tex_coords = model.tex_coords;
-    out.clip_position = camera[view_index].view_proj * vec4<f32>(model.position, 1.0);
+    let x_diff = (model.tex_coords.x - 0.5) * 2.0;
+    let y_diff = (model.tex_coords.y - 0.5) * 2.0;
+    let z_x_curvature = (1.0-x_diff*x_diff) * 4.0; //TODO: Parametrize
+    let z_y_curvature = (1.0-y_diff*y_diff) * 0.0; //TODO: Parametrize
+    out.clip_position = camera[view_index].view_proj * vec4<f32>(model.position.xy, model.position.z - z_x_curvature - z_y_curvature, 1.0);
     return out;
 }
 

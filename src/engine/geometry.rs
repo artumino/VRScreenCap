@@ -57,6 +57,45 @@ impl Mesh {
             indices: QUAD_INDICES.to_vec(),
         }
     }
+
+    pub fn get_plane_rectangle(rows: u16, columns: u16, aspect_ratio: f32, scale: f32, distance: f32) -> Mesh {
+        let mut vertices = vec![];
+        let x_increment = 2.0 / (columns as f32);
+        let y_increment = 2.0 / (columns as f32);
+        for row in 0..rows {
+            for column in 0..columns {
+                vertices.push(Vertex {
+                    position: [
+                        (-1.0 + (column as f32)*x_increment)*scale*aspect_ratio,
+                        (-1.0 + (row as f32)*y_increment)*scale,
+                        distance,
+                    ],
+                    tex_coords: [
+                        (column as f32)/(columns as f32),
+                        1.0 - (row as f32)/(rows as f32),
+                    ],
+                });
+            }
+        }
+
+        let mut indices = vec![];
+        for row in 0..rows-1 {
+            for column in 0..columns-1 {
+                indices.push(row * columns + column);
+                indices.push(row * columns + column + 1);
+                indices.push((row + 1) * columns + column);
+                indices.push((row + 1) * columns + column);
+                indices.push(row * columns + column + 1);
+                indices.push((row + 1) * columns + column + 1);
+            }
+        }
+
+        Mesh {
+            //FIXME: Handle flipping properly
+            vertices: vertices,
+            indices: indices,
+        }
+    }
 }
 
 pub const QUAD_VERTICES: &[Vertex] = &[

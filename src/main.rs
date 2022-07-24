@@ -69,7 +69,7 @@ async fn run() {
         }
     }
 
-    let screen = Mesh::get_rectangle(aspect_ratio, 10.0, -20.0);
+    let screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, 10.0, -20.0);
     let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
 
     let diffuse_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
