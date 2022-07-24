@@ -45,6 +45,10 @@ impl Loader for KatangaLoaderContext {
         println!("{:#01x}", tex_handle as usize);
 
         let tex_info = get_d3d11_texture_info(HANDLE(tex_handle as isize))?;
+        let vk_format = map_texture_format(tex_info.format);
+
+        println!("Mapped DXGI format to {:?}", tex_info.format);
+        println!("Mapped WGPU format to Vulkan {:?}", vk_format);
 
         let raw_image: Option<Result<vk::Image, Box<dyn Error>>> = unsafe {
             device.as_hal::<Vulkan, _, _>(|device| {
@@ -70,7 +74,7 @@ impl Loader for KatangaLoaderContext {
                         .push_next(&mut ext_create_info)
                         //.push_next(&mut dedicated_creation_info)
                         .image_type(vk::ImageType::TYPE_2D)
-                        .format(map_texture_format(tex_info.format))
+                        .format(vk_format)
                         .extent(vk::Extent3D {
                             width: tex_info.width,
                             height: tex_info.height,
@@ -104,7 +108,7 @@ impl Loader for KatangaLoaderContext {
                     mip_level_count: tex_info.mip_levels,
                     sample_count: tex_info.sample_count,
                     dimension: wgpu::TextureDimension::D2,
-                    format: tex_info.format,
+                    format: TextureFormat::Rgba8UnormSrgb,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 },
                 TextureDescriptor {
@@ -194,6 +198,8 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<D3D11TextureInfoAdapter, Box
     }?;
     let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
     unsafe { d3d11_texture.unwrap().GetDesc(&mut texture_desc) };
+
+    println!("Got texture from DX11 with format {:?}", texture_desc.Format);
 
     Ok(D3D11TextureInfoAdapter {
         width: texture_desc.Width,
