@@ -20,7 +20,14 @@ enum Messages {
     Quit,
 }
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let (tx, rx) = mpsc::channel();
     let mut tray = TrayItem::new("VR Screen Viewer", "tray-icon").unwrap();
     tray.add_menu_item("Quit", move || {
@@ -28,10 +35,10 @@ fn main() {
     })
     .unwrap();
     
-    pollster::block_on(run(&rx));
+    run(&rx);
 }
 
-async fn run(event_receiver: &mpsc::Receiver<Messages>) {
+fn run(event_receiver: &mpsc::Receiver<Messages>) {
     let mut xr_context = enable_xr_runtime().unwrap();
     let wgpu_context = xr_context.load_wgpu().unwrap();
 
