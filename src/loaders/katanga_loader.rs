@@ -108,7 +108,7 @@ impl Loader for KatangaLoaderContext {
                     mip_level_count: tex_info.mip_levels,
                     sample_count: tex_info.sample_count,
                     dimension: wgpu::TextureDimension::D2,
-                    format: TextureFormat::Rgba8UnormSrgb,
+                    format: tex_info.format,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 },
                 TextureDescriptor {
