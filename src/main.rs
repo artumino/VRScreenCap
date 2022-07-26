@@ -262,7 +262,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
             Some(openxr::Event::SessionStateChanged(e)) => {
                 // Session state change is where we can begin and end sessions, as well as
                 // find quit messages!
-                log::debug!("Entered state {:?}", e.state());
+                log::info!("Entered state {:?}", e.state());
                 match e.state() {
                     openxr::SessionState::READY => {
                         xr_session.begin(VIEW_TYPE).unwrap();
@@ -303,7 +303,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
                                 &[],
                             )
                             .unwrap();
-                        return;
+                        continue;
                     }
 
                     // If we do not have a swapchain yet, create it
@@ -422,6 +422,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
 
         match event_receiver.try_recv() {
             Ok(Messages::Quit) => {
+                log::info!("Qutting app manually...");
                 return;
             }
             _ => {}
