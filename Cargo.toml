@@ -11,14 +11,15 @@ wgpu-hal = { version = "0.13.1", features = ["vulkan"] }
 ash = "0.37.0"
 ash-window = "0.10.0"
 winit = "0.26"
-pollster = "0.2"
-env_logger = "0.9"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
 openxr = { version = "0.16.0", features=["static"] }
 bytemuck = { version = "1.10.0", features = [ "derive" ] }
 tray-item = "0.7.0"
 dhat = { version = "0.3.0", optional = true }
+log4rs = "1.1.1"
+log = "0.4.17"
+log-panics = { version = "2.1.0", features=["with-backtrace"] }
 
 [dependencies.windows]
 version = "0.38.0"

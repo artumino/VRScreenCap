@@ -6,6 +6,8 @@ use engine::{
     vr::enable_xr_runtime,
     WgpuLoader,
 };
+use log::LevelFilter;
+use log4rs::{append::file::FileAppender, encode::pattern::PatternEncoder, config::{Appender, Root}, Config};
 use std::{borrow::Cow, num::NonZeroU32, sync::mpsc};
 use tray_item::TrayItem;
 use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
@@ -28,8 +30,24 @@ fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
+    #[cfg(not(debug_assertions))] 
+    {
+        let logfile = FileAppender::builder()
+            .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
+            .build("output.log").unwrap();
+
+        let config = Config::builder()
+            .appender(Appender::builder().build("logfile", Box::new(logfile)))
+            .build(Root::builder()
+                    .appender("logfile")
+                    .build(LevelFilter::Info)).unwrap();
+
+        log4rs::init_config(config).unwrap();
+        log_panics::init();
+    }
+
     let (tx, rx) = mpsc::channel();
-    let mut tray = TrayItem::new("VR Screen Viewer", "tray-icon").unwrap();
+    let mut tray = TrayItem::new("VR Screen Cap", "tray-icon").unwrap();
     tray.add_menu_item("Quit", move || {
         tx.send(Messages::Quit).unwrap();
     })
@@ -244,7 +262,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
             Some(openxr::Event::SessionStateChanged(e)) => {
                 // Session state change is where we can begin and end sessions, as well as
                 // find quit messages!
-                println!("Entered state {:?}", e.state());
+                log::debug!("Entered state {:?}", e.state());
                 match e.state() {
                     openxr::SessionState::READY => {
                         xr_session.begin(VIEW_TYPE).unwrap();
@@ -262,7 +280,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
             }
             Some(openxr::Event::InstanceLossPending(_)) => {}
             Some(openxr::Event::EventsLost(e)) => {
-                println!("Lost {} OpenXR events", e.lost_event_count());
+                log::error!("Lost {} OpenXR events", e.lost_event_count());
             }
             _ => {
                 // Render to HMD only if we have an active session

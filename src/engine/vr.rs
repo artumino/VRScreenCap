@@ -51,7 +51,7 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     )?;
 
     let props = instance.properties()?;
-    println!(
+    log::info!(
         "loaded OpenXR runtime: {} {}",
         props.runtime_name, props.runtime_version
     );
@@ -102,7 +102,8 @@ impl WgpuLoader for OpenXRContext {
             .api_version(vk_target_version);
 
         let mut flags = hal::InstanceFlags::empty();
-        if cfg!(debug_assertions) {
+        #[cfg(debug_assertions)]
+        {
             flags |= hal::InstanceFlags::VALIDATION;
             flags |= hal::InstanceFlags::DEBUG;
         }
@@ -291,7 +292,7 @@ impl OpenXRContext {
         vk::Extent2D,
         Vec<TextureView>,
     ) {
-        println!("Creating OpenXR swapchain");
+        log::info!("Creating OpenXR swapchain");
 
         // Fetch the views we need to render to (the eye screens on the HMD)
         let views = self

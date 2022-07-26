@@ -32,7 +32,7 @@ impl Loader for KatangaLoaderContext {
     ) -> Result<TextureSource, Box<dyn Error>> {
         self.katanga_file_handle =
             unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile")? };
-        println!("Handle: {:?}", self.katanga_file_handle);
+        log::info!("Handle: {:?}", self.katanga_file_handle);
 
         self.katanga_file_mapping =
             unsafe { MapViewOfFile(self.katanga_file_handle, FILE_MAP_ALL_ACCESS, 0, 0, 4) };
@@ -42,13 +42,13 @@ impl Loader for KatangaLoaderContext {
 
         let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
         let tex_handle = (address | 0xFFFFFFFF00000000) as vk::HANDLE;
-        println!("{:#01x}", tex_handle as usize);
+        log::info!("{:#01x}", tex_handle as usize);
 
         let tex_info = get_d3d11_texture_info(HANDLE(tex_handle as isize))?;
         let vk_format = map_texture_format(tex_info.format);
 
-        println!("Mapped DXGI format to {:?}", tex_info.format);
-        println!("Mapped WGPU format to Vulkan {:?}", vk_format);
+        log::info!("Mapped DXGI format to {:?}", tex_info.format);
+        log::info!("Mapped WGPU format to Vulkan {:?}", vk_format);
 
         let raw_image: Option<Result<vk::Image, Box<dyn Error>>> = unsafe {
             device.as_hal::<Vulkan, _, _>(|device| {
@@ -149,18 +149,18 @@ impl Default for KatangaLoaderContext {
 
 impl Drop for KatangaLoaderContext {
     fn drop(&mut self) {
-        println!("Dropping KatangaLoaderContext");
+        log::info!("Dropping KatangaLoaderContext");
 
         if !self.katanga_file_mapping.is_null()
             && unsafe { bool::from(UnmapViewOfFile(self.katanga_file_mapping)) }
         {
-            println!("Unmapped file!");
+            log::info!("Unmapped file!");
         }
 
         if !self.katanga_file_handle.is_invalid()
             && unsafe { bool::from(CloseHandle(self.katanga_file_handle)) }
         {
-            println!("Closed handle!");
+            log::info!("Closed handle!");
         }
     }
 }
@@ -199,7 +199,7 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<D3D11TextureInfoAdapter, Box
     let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
     unsafe { d3d11_texture.unwrap().GetDesc(&mut texture_desc) };
 
-    println!("Got texture from DX11 with format {:?}", texture_desc.Format);
+    log::info!("Got texture from DX11 with format {:?}", texture_desc.Format);
 
     Ok(D3D11TextureInfoAdapter {
         width: texture_desc.Width,
