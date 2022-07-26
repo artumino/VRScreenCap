@@ -18,6 +18,6 @@ DX11 games.
 - Start VRScreenCap
 
 The feed should then be visible on a curved screen. In case the video feed freezes, restart VRScreenCap.
-Some VR runtimes doesn't seem to allow for screen recentering, a future update will probably take care of this in-app.
+Some VR runtimes don't seem to allow for screen recentering, a future update will probably take care of this in-app.
 
-**ATTENTION**: VRScreenCap doesn't open any window on the desktop, it only appears as a tray icon (and in your vr runtimes dashboard).
+**ATTENTION**: VRScreenCap doesn't open any window on the desktop, it only appears as a tray icon (and in your VR runtime's dashboard).
