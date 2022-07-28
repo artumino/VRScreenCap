@@ -1,14 +1,16 @@
 #![windows_subsystem = "windows"]
 use ash::vk::Handle;
+use clap::Parser;
 use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
     vr::enable_xr_runtime,
     WgpuLoader,
 };
+use loaders::{ScreenParams, StereoMode};
 use log::LevelFilter;
 use log4rs::{append::file::FileAppender, encode::pattern::PatternEncoder, config::{Appender, Root}, Config};
-use std::{borrow::Cow, num::NonZeroU32, sync::mpsc};
+use std::{borrow::Cow, num::NonZeroU32, sync::{Arc, Mutex}};
 use tray_item::TrayItem;
 use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
 
@@ -18,8 +20,19 @@ mod conversions;
 mod engine;
 mod loaders;
 
-enum Messages {
+enum TrayMessages {
     Quit,
+    ToggleSettings(ToggleSetting)
+}
+
+enum ToggleSetting {
+    FlipX,
+    FlipY,
+    SwapEyes
+}
+
+struct TrayState {
+    pub message: Option<TrayMessages>
 }
 
 #[cfg(feature = "dhat-heap")]
@@ -46,17 +59,46 @@ fn main() {
         log_panics::init();
     }
 
-    let (tx, rx) = mpsc::channel();
-    let mut tray = TrayItem::new("VR Screen Cap", "tray-icon").unwrap();
-    tray.add_menu_item("Quit", move || {
-        tx.send(Messages::Quit).unwrap();
-    })
-    .unwrap();
     
-    run(&rx);
+    let (_tray, tray_state) = build_tray();
+    run(&tray_state);
 }
 
-fn run(event_receiver: &mpsc::Receiver<Messages>) {
+fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
+    let mut tray = TrayItem::new("VR Screen Cap", "tray-icon").unwrap();
+    let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
+
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Quit", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::Quit);
+    })
+    .unwrap();
+
+    tray.add_label("Settings").unwrap();
+
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Swap Eyes", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::ToggleSettings(ToggleSetting::SwapEyes));
+    })
+    .unwrap();
+
+    
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Flip X", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::ToggleSettings(ToggleSetting::FlipX));
+    })
+    .unwrap();
+
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Flip Y", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::ToggleSettings(ToggleSetting::FlipY));
+    })
+    .unwrap();
+
+    (tray, tray_state)
+}
+
+fn run(tray_state: &Arc<Mutex<TrayState>>) {
     let mut xr_context = enable_xr_runtime().unwrap();
     let wgpu_context = xr_context.load_wgpu().unwrap();
 
@@ -88,17 +130,28 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
     });
 
     let mut aspect_ratio = 1.0;
+    let mut stereo_mode = StereoMode::Mono;
     #[cfg(target_os = "windows")]
     {
         let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
         if let Ok(tex_source) = cata.load(&wgpu_context.instance, &wgpu_context.device) {
             screen_texture = tex_source.texture;
             aspect_ratio = (tex_source.width as f32 / 2.0) / tex_source.height as f32;
+            stereo_mode = tex_source.stereo_mode;
         }
     }
 
-    let screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, 10.0, -20.0);
+    let mut screen_params = ScreenParams::parse();
+    let screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, screen_params.scale, screen_params.distance);
     let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
+
+    let screen_params_buffer = wgpu_context
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Screen Params Buffer"),
+            contents: bytemuck::cast_slice(&[screen_params.uniform()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
     let diffuse_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
     let diffuse_sampler = wgpu_context
@@ -168,7 +221,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-    let camera_bind_group_layout =
+    let global_uniform_bind_group_layout =
         wgpu_context
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -181,22 +234,36 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
                         min_binding_size: None,
                     },
                     count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 }],
-                label: Some("camera_bind_group_layout"),
+                label: Some("global_uniform_bind_group_layout"),
             });
 
-    let camera_bind_group = wgpu_context
+    let global_uniform_bind_group = wgpu_context
         .device
         .create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
+            layout: &global_uniform_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: screen_params_buffer.as_entire_binding(),
             }],
-            label: Some("camera_bind_group"),
+            label: Some("global_uniform_bind_group"),
         });
 
-    bind_group_layouts.push(camera_bind_group_layout);
+    bind_group_layouts.push(global_uniform_bind_group_layout);
 
     let pipeline_layout =
         wgpu_context
@@ -249,7 +316,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
 
     // Create a room-scale reference space
     let stage = xr_session
-        .create_reference_space(openxr::ReferenceSpaceType::STAGE, openxr::Posef::IDENTITY)
+        .create_reference_space(openxr::ReferenceSpaceType::LOCAL, openxr::Posef::IDENTITY)
         .unwrap();
 
     let mut event_storage = openxr::EventDataBuffer::new();
@@ -338,7 +405,7 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
                         rpass.set_pipeline(&render_pipeline);
 
                         rpass.set_bind_group(0, &diffuse_bind_group, &[]);
-                        rpass.set_bind_group(1, &camera_bind_group, &[]);
+                        rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
                         rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
                         rpass.set_index_buffer(
                             screen_index_buffer.slice(..),
@@ -420,10 +487,34 @@ fn run(event_receiver: &mpsc::Receiver<Messages>) {
             }
         }
 
-        match event_receiver.try_recv() {
-            Ok(Messages::Quit) => {
+        match tray_state.lock().unwrap().message.take() {
+            Some(TrayMessages::Quit) => {
                 log::info!("Qutting app manually...");
                 return;
+            }
+            Some(TrayMessages::ToggleSettings(setting)) => {
+                match setting {
+                    ToggleSetting::SwapEyes => {
+                        screen_params.swap_eyes = !screen_params.swap_eyes;
+                        wgpu_context.queue.write_buffer(&screen_params_buffer, 0, bytemuck::cast_slice(&[screen_params.uniform()]))
+                    },
+                    ToggleSetting::FlipX => {
+                        screen_params.flip_x = !screen_params.flip_x;
+                        match stereo_mode {
+                            StereoMode::SBS | StereoMode::FSBS => { screen_params.swap_eyes = !screen_params.swap_eyes; }
+                            _ => {}
+                        }
+                        wgpu_context.queue.write_buffer(&screen_params_buffer, 0, bytemuck::cast_slice(&[screen_params.uniform()]))
+                    },
+                    ToggleSetting::FlipY => {
+                        screen_params.flip_y = !screen_params.flip_y;
+                        match stereo_mode {
+                            StereoMode::TAB | StereoMode::FTAB => { screen_params.swap_eyes = !screen_params.swap_eyes; }
+                            _ => {}
+                        }
+                        wgpu_context.queue.write_buffer(&screen_params_buffer, 0, bytemuck::cast_slice(&[screen_params.uniform()]))
+                    }
+                }
             }
             _ => {}
         }

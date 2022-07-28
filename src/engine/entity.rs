@@ -12,15 +12,13 @@ pub struct Entity {
 
 impl Default for Entity {
     fn default() -> Self {
-        Self {
-            id: Default::default(), //TODO registry
-            parent_id: None,
-            position: Vector3::<f32>::zero(),
-            rotation: Quaternion::<f32>::zero(),
-            scale: Vector3::<f32>::new(1.0, 1.0, 1.0),
-            world_matrix: Matrix4::identity(),
-            local_matrix: Matrix4::identity(),
-        }
+        //TODO registry
+        Self::new(
+            Default::default(),
+            Vector3::zero(),
+            Quaternion::zero(),
+            Vector3::new(1.0, 1.0, 1.0),
+        )
     }
 }
 
