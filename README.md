@@ -21,3 +21,20 @@ The feed should then be visible on a curved screen. In case the video feed freez
 Some VR runtimes don't seem to allow for screen recentering, a future update will probably take care of this in-app.
 
 **ATTENTION**: VRScreenCap doesn't open any window on the desktop, it only appears as a tray icon (and in your VR runtime's dashboard).
+
+
+## Launch Parameters
+
+VR-Screen-Cap offers a few configuration launch parameters (all of them are optional):
+```
+vr-screen-cap.exe [OPTIONS]
+  OPTIONS:
+    --x-curvature=4.0
+    --y-curvature=0.8
+    --swap-eyes=true
+    --flip-x=false
+    --flip-y=false
+    --distance=-20.0
+    --scale=10.0
+```
+Where every distance is in meters. Vertical and Horizontal curvatures are summed together so a 2m curvature in both directions will result in a 4m deep screen at the center.
