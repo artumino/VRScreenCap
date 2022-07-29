@@ -38,3 +38,8 @@ vr-screen-cap.exe [OPTIONS]
     --scale=10.0
 ```
 Where every distance is in meters. Vertical and Horizontal curvatures are summed together so a 2m curvature in both directions will result in a 4m deep screen at the center.
+
+
+## WMR Users Disclaimer
+
+This application uses Vulkan as its backend. To the best of my knowledge WMR still doesn't support OpenXR Vulkan applications so this one won't work out of the box for you. You can try to run VR Screen Cap through projects like [OpenXR-Vk-D3D12](https://github.com/mbucchia/OpenXR-Vk-D3D12) but I can't guarantee It'll work.
