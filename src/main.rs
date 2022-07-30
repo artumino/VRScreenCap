@@ -142,7 +142,7 @@ fn run(tray_state: &Arc<Mutex<TrayState>>) {
     }
 
     let mut screen_params = ScreenParams::parse();
-    let screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, screen_params.scale, screen_params.distance);
+    let screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, screen_params.scale, -screen_params.distance);
     let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
 
     let screen_params_buffer = wgpu_context
@@ -315,7 +315,7 @@ fn run(tray_state: &Arc<Mutex<TrayState>>) {
     };
 
     // Create a room-scale reference space
-    let stage = xr_session
+    let xr_space = xr_session
         .create_reference_space(openxr::ReferenceSpaceType::LOCAL, openxr::Posef::IDENTITY)
         .unwrap();
 
@@ -421,7 +421,7 @@ fn run(tray_state: &Arc<Mutex<TrayState>>) {
                     // host-visible memory which the GPU will only read once the command buffer is
                     // submitted.
                     let (_, views) = xr_session
-                        .locate_views(VIEW_TYPE, xr_frame_state.predicted_display_time, &stage)
+                        .locate_views(VIEW_TYPE, xr_frame_state.predicted_display_time, &xr_space)
                         .unwrap();
                     let mut view_idx = 0;
                     for view in views.iter() {
@@ -460,7 +460,7 @@ fn run(tray_state: &Arc<Mutex<TrayState>>) {
                             xr_frame_state.predicted_display_time,
                             xr_context.blend_mode,
                             &[&openxr::CompositionLayerProjection::new()
-                                .space(&stage)
+                                .space(&xr_space)
                                 .views(&[
                                     openxr::CompositionLayerProjectionView::new()
                                         .pose(views[0].pose)
