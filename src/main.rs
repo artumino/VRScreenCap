@@ -42,6 +42,9 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
+    
+    #[cfg(feature = "renderdoc")]
+    let _rd: renderdoc::RenderDoc<renderdoc::V110> = renderdoc::RenderDoc::new().expect("Unable to connect");
 
     #[cfg(not(debug_assertions))] 
     {
