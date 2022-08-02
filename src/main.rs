@@ -4,15 +4,17 @@ use clap::Parser;
 use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
-    vr::enable_xr_runtime,
-    WgpuLoader,
+    vr::{enable_xr_runtime, OpenXRContext},
+    WgpuLoader, WgpuContext,
 };
 use loaders::{ScreenParams, StereoMode};
 use log::LevelFilter;
 use log4rs::{append::file::FileAppender, encode::pattern::PatternEncoder, config::{Appender, Root}, Config};
+use ::windows::Win32::System::Threading::{SetPriorityClass, GetCurrentProcess, HIGH_PRIORITY_CLASS};
 use std::{borrow::Cow, num::NonZeroU32, sync::{Arc, Mutex}};
 use tray_item::TrayItem;
 use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
+use thread_priority::*;
 
 use crate::{engine::geometry::Mesh, loaders::Loader};
 
@@ -62,9 +64,13 @@ fn main() {
         log_panics::init();
     }
 
-    
+    try_elevate_priority();
+
+    let mut xr_context = enable_xr_runtime().unwrap();
+    let wgpu_context = xr_context.load_wgpu().unwrap();
     let (_tray, tray_state) = build_tray();
-    run(&tray_state);
+    
+    run(&mut xr_context, &wgpu_context, &tray_state);
 }
 
 fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
@@ -101,9 +107,20 @@ fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
     (tray, tray_state)
 }
 
-fn run(tray_state: &Arc<Mutex<TrayState>>) {
-    let mut xr_context = enable_xr_runtime().unwrap();
-    let wgpu_context = xr_context.load_wgpu().unwrap();
+fn try_elevate_priority() {
+    if set_current_thread_priority(ThreadPriority::Os(WinAPIThreadPriority::Highest.into())).is_err() {
+        log::warn!("Failed to set thread priority to max!");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if !unsafe{SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)}.as_bool() {
+            log::warn!("Failed to set process priority to max!");
+        }
+    }
+}
+
+fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &Arc<Mutex<TrayState>>) {
 
     // Load the shaders from disk
     let shader = wgpu_context
@@ -291,7 +308,7 @@ fn run(tray_state: &Arc<Mutex<TrayState>>) {
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: "fs_main",
-                    targets: &[Some(TextureFormat::Bgra8UnormSrgb.into())],
+                    targets: &[Some(TextureFormat::Bgra8Unorm.into())],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,

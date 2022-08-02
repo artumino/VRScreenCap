@@ -1802,6 +1802,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread-priority"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "696668a68983ad737e08e11e9afb701e962cab9f07f2a4ff339316b2d5b0870d"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "log",
+ "winapi",
+]
+
+[[package]]
 name = "time"
 version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1914,6 +1926,7 @@ dependencies = [
  "mint",
  "openxr",
  "renderdoc",
+ "thread-priority",
  "tray-item",
  "wgpu",
  "wgpu-hal",
