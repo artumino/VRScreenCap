@@ -141,7 +141,6 @@ impl Loader for KatangaLoaderContext {
 
     fn is_invalid(&self) -> bool {
         let address = unsafe { *(self.katanga_file_mapping as *mut usize) } | 0xFFFFFFFF00000000;
-        log::info!("{:#01x}", address);
         return self.current_address != address;
     }
 }
