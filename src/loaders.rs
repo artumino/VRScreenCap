@@ -27,6 +27,8 @@ pub trait Loader {
         instance: &Instance,
         device: &Device,
     ) -> Result<TextureSource, Box<dyn Error>>;
+
+    fn is_invalid(&self) -> bool;
 }
 
 #[repr(C)]

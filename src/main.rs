@@ -24,6 +24,7 @@ mod loaders;
 
 enum TrayMessages {
     Quit,
+    Reload,
     ToggleSettings(ToggleSetting)
 }
 
@@ -104,6 +105,12 @@ fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
     })
     .unwrap();
 
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Reload Screen", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::Reload);
+    })
+    .unwrap();
+
     (tray, tray_state)
 }
 
@@ -133,8 +140,9 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
     // We don't need to configure the texture view much, so let's
     // let wgpu define it.
 
-    let mut bind_group_layouts = vec![];
-
+    let mut aspect_ratio = 1.0;
+    let mut stereo_mode = StereoMode::Mono;
+    let mut current_loader = None;
     let mut screen_texture = wgpu_context.device.create_texture(&TextureDescriptor {
         label: "Blank".into(),
         size: wgpu::Extent3d {
@@ -149,21 +157,23 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
         usage: wgpu::TextureUsages::TEXTURE_BINDING,
     });
 
-    let mut aspect_ratio = 1.0;
-    let mut stereo_mode = StereoMode::Mono;
-    #[cfg(target_os = "windows")]
-    {
-        let mut cata = loaders::katanga_loader::KatangaLoaderContext::default();
-        if let Ok(tex_source) = cata.load(&wgpu_context.instance, &wgpu_context.device) {
-            screen_texture = tex_source.texture;
-            aspect_ratio = (tex_source.width as f32 / 2.0) / tex_source.height as f32;
-            stereo_mode = tex_source.stereo_mode;
+    let mut loaders = vec!(
+        #[cfg(target_os = "windows")]
+        {
+            loaders::katanga_loader::KatangaLoaderContext::default()
         }
+    );
+    
+    if let Some((texture, aspect, mode, loader)) = try_to_load_texture(&mut loaders, wgpu_context) {
+        screen_texture = texture;
+        aspect_ratio = aspect;
+        stereo_mode = mode;
+        current_loader = Some(loader);
     }
 
     let mut screen_params = ScreenParams::parse();
-    let screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, screen_params.scale, -screen_params.distance);
-    let (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
+    let mut screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, screen_params.scale, -screen_params.distance);
+    let (mut screen_vertex_buffer, mut screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
 
     let screen_params_buffer = wgpu_context
         .device
@@ -172,63 +182,6 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
             contents: bytemuck::cast_slice(&[screen_params.uniform()]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-
-    let diffuse_texture_view = screen_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let diffuse_sampler = wgpu_context
-        .device
-        .create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-    let texture_bind_group_layout =
-        wgpu_context
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
-    let diffuse_bind_group = wgpu_context
-        .device
-        .create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
-    bind_group_layouts.push(texture_bind_group_layout);
 
     let mut cameras = vec![Camera::default(), Camera::default()];
     let mut camera_uniform = vec![CameraUniform::new(), CameraUniform::new()];
@@ -240,33 +193,62 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
             contents: bytemuck::cast_slice(camera_uniform.as_slice()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+    
 
-    let global_uniform_bind_group_layout =
-        wgpu_context
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
+
+    let texture_bind_group_layout =
+    wgpu_context
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                     },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // This should match the filterable field of the
+                    // corresponding Texture entry above.
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
-                }],
-                label: Some("global_uniform_bind_group_layout"),
-            });
+                },
+            ],
+            label: Some("texture_bind_group_layout"),
+        });
+
+    let global_uniform_bind_group_layout =
+    wgpu_context
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+            label: Some("global_uniform_bind_group_layout"),
+        });
 
     let global_uniform_bind_group = wgpu_context
         .device
@@ -283,8 +265,27 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
             label: Some("global_uniform_bind_group"),
         });
 
+    let diffuse_sampler = wgpu_context
+        .device
+        .create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+    
+
+    let mut bind_group_layouts = vec![];
+    bind_group_layouts.push(texture_bind_group_layout);
     bind_group_layouts.push(global_uniform_bind_group_layout);
 
+    // Not pretty at all, but it works.
+    let texture_bind_group_layout = bind_group_layouts.get(0).unwrap();
+    let mut diffuse_bind_group = bind_texture(wgpu_context, texture_bind_group_layout, &screen_texture.create_view(&wgpu::TextureViewDescriptor::default()), &diffuse_sampler);
+    
     let pipeline_layout =
         wgpu_context
             .device
@@ -342,8 +343,33 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
     let mut event_storage = openxr::EventDataBuffer::new();
     let mut session_running = false;
     let mut swapchain = None;
+    let mut screen_invalidated = false;
+    let mut last_invalidation_check = std::time::Instant::now();
+    
     // Handle OpenXR events
     loop {
+
+        let time = std::time::Instant::now();
+
+        if current_loader.is_some() || time.duration_since(last_invalidation_check).as_secs() > 10 {
+            check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated);
+            last_invalidation_check = time;
+        }
+
+        if screen_invalidated {
+            if let Some((texture, aspect, mode, loader)) = try_to_load_texture(&mut loaders, wgpu_context) {
+                screen_texture.destroy();
+                screen_texture = texture;
+                aspect_ratio = aspect;
+                stereo_mode = mode;
+                current_loader = Some(loader);
+                screen = Mesh::get_plane_rectangle(100, 100, aspect_ratio, screen_params.scale, -screen_params.distance);
+                diffuse_bind_group = bind_texture(wgpu_context, &texture_bind_group_layout, &screen_texture.create_view(&wgpu::TextureViewDescriptor::default()), &diffuse_sampler);
+                (screen_vertex_buffer, screen_index_buffer) = screen.get_buffers(&wgpu_context.device);
+            }
+            screen_invalidated = false;
+        }
+
         let event = xr_context.instance.poll_event(&mut event_storage).unwrap();
         match event {
             Some(openxr::Event::SessionStateChanged(e)) => {
@@ -511,7 +537,10 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
             Some(TrayMessages::Quit) => {
                 log::info!("Qutting app manually...");
                 return;
-            }
+            },
+            Some(TrayMessages::Reload) => {
+                check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated);
+            },
             Some(TrayMessages::ToggleSettings(setting)) => {
                 match setting {
                     ToggleSetting::SwapEyes => {
@@ -539,6 +568,50 @@ fn run(xr_context: &mut OpenXRContext, wgpu_context: &WgpuContext, tray_state: &
             _ => {}
         }
     }
+}
+
+fn check_loader_invalidation(current_loader: Option<usize>, loaders: &Vec<loaders::katanga_loader::KatangaLoaderContext>, screen_invalidated: &mut bool) {
+    if let Some(loader) = current_loader {
+        if loaders.get(loader).unwrap().is_invalid() {
+            log::info!("Reloading app...");
+            *screen_invalidated = true;
+        }
+    } else {
+        *screen_invalidated = true;
+    }
+}
+
+fn bind_texture(wgpu_context: &WgpuContext, texture_bind_group_layout: &wgpu::BindGroupLayout, diffuse_texture_view: &wgpu::TextureView, diffuse_sampler: &wgpu::Sampler) -> wgpu::BindGroup {
+    wgpu_context
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(diffuse_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        })
+}
+
+fn try_to_load_texture<'a>(loaders: &'a mut Vec<loaders::katanga_loader::KatangaLoaderContext>, wgpu_context: &WgpuContext) -> Option<(wgpu::Texture, f32, StereoMode, usize)> {
+    let mut loader_idx = 0;
+    for loader in loaders.iter_mut() {
+        if let Ok(tex_source) = loader.load(&wgpu_context.instance, &wgpu_context.device) {
+            return Some((tex_source.texture, 
+                (tex_source.width as f32 / 2.0) / tex_source.height as f32, 
+                tex_source.stereo_mode, 
+                loader_idx));
+        }
+        loader_idx += 1;
+    }
+    None
 }
 
 const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
