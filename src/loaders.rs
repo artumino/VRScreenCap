@@ -27,6 +27,8 @@ pub trait Loader {
         instance: &Instance,
         device: &Device,
     ) -> Result<TextureSource, Box<dyn Error>>;
+
+    fn is_invalid(&self) -> bool;
 }
 
 #[repr(C)]
@@ -56,8 +58,8 @@ pub struct ScreenParams {
     // default: false, usage: --flip-y=false
     #[clap(long, value_parser, default_value_t = false)]
     pub flip_y: bool,
-    // Distance from user in meters -Z forward, default: -20.0, usage: --distance=-20.0
-    #[clap(short, long, value_parser, default_value_t = -20.0)]
+    // Distance from user in meters -Z forward, default: 20.0, usage: --distance=20.0
+    #[clap(short, long, value_parser, default_value_t = 20.0)]
     pub distance: f32,
     // Screen scaling factor (a screen with aspect ratio 1:1 with scaling factor 1.0 would be 2m wide), default: 10.0, usage: --scale=10.0
     #[clap(short, long, value_parser, default_value_t = 10.0)]
@@ -93,7 +95,7 @@ impl Default for ScreenParams {
             swap_eyes: true,
             flip_x: false,
             flip_y: false,
-            distance: -20.0,
+            distance: 20.0,
             scale: 10.0
         }
     }

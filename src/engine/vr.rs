@@ -303,7 +303,8 @@ impl OpenXRContext {
         assert_eq!(views[0], views[1]);
 
         // Create the OpenXR swapchain
-        let color_format = vk::Format::B8G8R8A8_SRGB;
+        let vk_color_format = vk::Format::B8G8R8A8_SRGB;
+        let color_format = wgpu::TextureFormat::Bgra8Unorm;
         let resolution = vk::Extent2D {
             width: views[0].recommended_image_rect_width,
             height: views[0].recommended_image_rect_height,
@@ -313,7 +314,7 @@ impl OpenXRContext {
                 create_flags: openxr::SwapchainCreateFlags::EMPTY,
                 usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
                     | openxr::SwapchainUsageFlags::SAMPLED,
-                format: color_format.clone().as_raw() as _,
+                format: vk_color_format.clone().as_raw() as _,
                 sample_count: 1,
                 width: resolution.width,
                 height: resolution.height,
@@ -343,7 +344,7 @@ impl OpenXRContext {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        format: color_format,
                         usage: TextureUsages::all(), //todo what here?
                     },
                     wgpu_hal::TextureDescriptor {
@@ -356,14 +357,14 @@ impl OpenXRContext {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        format: color_format,
                         usage: TextureUses::all(), //todo what here?
                         memory_flags: MemoryFlags::empty(),
                     },
                 );
                 image.create_view(&TextureViewDescriptor {
                     label: None,
-                    format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                    format: Some(color_format),
                     dimension: Some(TextureViewDimension::D2Array),
                     aspect: TextureAspect::All,
                     base_mip_level: 0,

@@ -34,7 +34,7 @@ vr-screen-cap.exe [OPTIONS]
     --swap-eyes=true
     --flip-x=false
     --flip-y=false
-    --distance=-20.0
+    --distance=20.0
     --scale=10.0
 ```
 Where every distance is in meters. Vertical and Horizontal curvatures are summed together so a 2m curvature in both directions will result in a 4m deep screen at the center.

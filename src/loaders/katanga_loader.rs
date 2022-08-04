@@ -22,6 +22,7 @@ use super::{Loader, TextureSource};
 pub struct KatangaLoaderContext {
     katanga_file_handle: HANDLE,
     katanga_file_mapping: *mut c_void,
+    current_address: usize,
 }
 
 impl Loader for KatangaLoaderContext {
@@ -41,7 +42,8 @@ impl Loader for KatangaLoaderContext {
         }
 
         let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
-        let tex_handle = (address | 0xFFFFFFFF00000000) as vk::HANDLE;
+        self.current_address = address | 0xFFFFFFFF00000000;
+        let tex_handle = self.current_address as vk::HANDLE;
         log::info!("{:#01x}", tex_handle as usize);
 
         let tex_info = get_d3d11_texture_info(HANDLE(tex_handle as isize))?;
@@ -136,6 +138,11 @@ impl Loader for KatangaLoaderContext {
 
         return Err("Cannot open shared texture!".into());
     }
+
+    fn is_invalid(&self) -> bool {
+        let address = unsafe { *(self.katanga_file_mapping as *mut usize) } | 0xFFFFFFFF00000000;
+        return self.current_address != address;
+    }
 }
 
 impl Default for KatangaLoaderContext {
@@ -143,6 +150,7 @@ impl Default for KatangaLoaderContext {
         Self {
             katanga_file_handle: Default::default(),
             katanga_file_mapping: ptr::null_mut(),
+            current_address: 0,
         }
     }
 }
