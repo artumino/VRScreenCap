@@ -18,7 +18,6 @@ use log4rs::{
     encode::pattern::PatternEncoder,
     Config,
 };
-use openxr::Color4f;
 use std::{
     borrow::Cow,
     num::NonZeroU32,
@@ -84,10 +83,12 @@ fn main() {
     let wgpu_context = xr_context.load_wgpu().unwrap();
     let (_tray, tray_state) = build_tray();
 
+    log::info!("Finished initial setup, running main loop");
     run(&mut xr_context, &wgpu_context, &tray_state);
 }
 
 fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
+    log::info!("Building system tray");
     let mut tray = TrayItem::new("VR Screen Cap", "tray-icon").unwrap();
     let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
 
@@ -130,6 +131,7 @@ fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
 }
 
 fn try_elevate_priority() {
+    log::info!("Trying to elevate process priority");
     if set_current_thread_priority(ThreadPriority::Os(WinAPIThreadPriority::Highest.into()))
         .is_err()
     {

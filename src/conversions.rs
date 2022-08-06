@@ -22,7 +22,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_R8G8B8A8_UINT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
     DXGI_FORMAT_R8G8_SINT, DXGI_FORMAT_R8G8_SNORM, DXGI_FORMAT_R8G8_UINT,
     DXGI_FORMAT_R8G8_UNORM, DXGI_FORMAT_R8_SINT, DXGI_FORMAT_R8_SNORM, DXGI_FORMAT_R8_UINT,
-    DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
+    DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP, DXGI_FORMAT_R8G8B8A8_TYPELESS,
 };
 
 pub fn vulkan_image_to_texture(device: &Device, image: vk::Image, tex_desc: TextureDescriptor, hal_tex_desc: wgpu_hal::TextureDescriptor) -> wgpu::Texture {
@@ -66,6 +66,7 @@ pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
         DXGI_FORMAT_R16G16_UINT => TextureFormat::Rg16Uint,
         DXGI_FORMAT_R16G16_SINT => TextureFormat::Rg16Sint,
         DXGI_FORMAT_R16G16_FLOAT => TextureFormat::Rg16Float,
+        DXGI_FORMAT_R8G8B8A8_TYPELESS => TextureFormat::Rgba8Unorm,
         DXGI_FORMAT_R8G8B8A8_UNORM => TextureFormat::Rgba8Unorm,
         DXGI_FORMAT_R8G8B8A8_UNORM_SRGB => TextureFormat::Rgba8UnormSrgb,
         DXGI_FORMAT_B8G8R8A8_UNORM_SRGB => TextureFormat::Bgra8UnormSrgb,

@@ -29,6 +29,7 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     entry.initialize_android_loader().unwrap();
 
     let available_extensions = entry.enumerate_extensions().unwrap();
+    log::info!("Available extensions: {:?}", available_extensions);
     assert!(available_extensions.khr_vulkan_enable2);
 
     let mut enabled_extensions = openxr::ExtensionSet::default();
@@ -38,6 +39,7 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     {
         enabled_extensions.khr_android_create_instance = true;
     }
+    log::info!("Enabled extensions: {:?}", enabled_extensions);
 
     let instance = entry.create_instance(
         &openxr::ApplicationInfo {
@@ -53,7 +55,8 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     let props = instance.properties()?;
     log::info!(
         "loaded OpenXR runtime: {} {}",
-        props.runtime_name, props.runtime_version
+        props.runtime_name,
+        props.runtime_version
     );
 
     // Request a form factor from the device (HMD, Handheld, etc.)
@@ -62,6 +65,12 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     // Check what blend mode is valid for this device (opaque vs transparent displays). We'll just
     // take the first one available!
     let blend_mode = instance.enumerate_environment_blend_modes(system, VIEW_TYPE)?[0];
+
+    log::info!(
+        "Created OpenXR context with : {:?} {:?}",
+        system,
+        blend_mode
+    );
 
     Ok(OpenXRContext {
         instance,
@@ -95,6 +104,7 @@ impl WgpuLoader for OpenXRContext {
         }
 
         let vk_entry = unsafe { ash::Entry::load().unwrap() };
+        log::info!("Successfully loaded Vulkan entry");
 
         let vk_app_info = vk::ApplicationInfo::builder()
             .application_version(0)
@@ -112,6 +122,9 @@ impl WgpuLoader for OpenXRContext {
         let instance_extensions =
             <hal::api::Vulkan as hal::Api>::Instance::required_extensions(&vk_entry, flags)
                 .unwrap();
+
+        log::info!("Requested instance extensions: {:?}", instance_extensions);
+
         let instance_extensions_ptrs = instance_extensions
             .iter()
             .map(|x| x.as_ptr())
@@ -138,6 +151,8 @@ impl WgpuLoader for OpenXRContext {
             )
         };
 
+        log::info!("Successfully created Vulkan instance");
+
         let vk_physical_device = vk::PhysicalDevice::from_raw(
             self.instance
                 .vulkan_graphics_device(self.system, vk_instance.handle().as_raw() as _)
@@ -150,6 +165,11 @@ impl WgpuLoader for OpenXRContext {
             unsafe { vk_instance.destroy_instance(None) };
             panic!("Vulkan phyiscal device doesn't support version 1.1");
         }
+
+        log::info!(
+            "Got Vulkan physical device with version {}",
+            vk_device_properties.api_version
+        );
 
         let queue_family_index = unsafe {
             vk_instance
@@ -166,6 +186,8 @@ impl WgpuLoader for OpenXRContext {
                 .expect("Vulkan device has no graphics queue")
         };
 
+        log::info!("Got Vulkan queue family index {}", queue_family_index);
+
         let hal_instance = unsafe {
             <hal::api::Vulkan as hal::Api>::Instance::from_raw(
                 vk_entry.clone(),
@@ -181,13 +203,21 @@ impl WgpuLoader for OpenXRContext {
         };
         let hal_exposed_adapter = hal_instance.expose_adapter(vk_physical_device).unwrap();
 
+        log::info!("Created WGPU-HAL instance and adapter");
+
         let device_descriptor = wgpu::DeviceDescriptor {
             features: wgpu::Features::MULTIVIEW,
             ..Default::default()
         };
-        let device_extensions = hal_exposed_adapter
+        let mut device_extensions = hal_exposed_adapter
             .adapter
             .required_device_extensions(device_descriptor.features);
+
+        #[cfg(target_os = "windows")]
+        device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
+
+        log::info!("Requested device extensions: {:?}", device_extensions);
+
         let device_extensions_ptrs = device_extensions
             .iter()
             .map(|x| x.as_ptr())
@@ -238,6 +268,8 @@ impl WgpuLoader for OpenXRContext {
             }
         };
 
+        log::info!("Successfully created Vulkan device");
+
         let hal_device = unsafe {
             hal_exposed_adapter
                 .adapter
@@ -253,6 +285,8 @@ impl WgpuLoader for OpenXRContext {
                 .unwrap()
         };
 
+        log::info!("Successfully created WGPU-HAL device from vulkan device");
+
         let wgpu_instance =
             unsafe { wgpu::Instance::from_hal::<wgpu_hal::api::Vulkan>(hal_instance) };
         let wgpu_adapter = unsafe { wgpu_instance.create_adapter_from_hal(hal_exposed_adapter) };
@@ -261,6 +295,8 @@ impl WgpuLoader for OpenXRContext {
                 .create_device_from_hal(hal_device, &device_descriptor, None)
                 .unwrap()
         };
+
+        log::info!("Successfully created WGPU context");
 
         Some(super::WgpuContext {
             instance: wgpu_instance,
