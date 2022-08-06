@@ -132,16 +132,16 @@ impl Loader for KatangaLoaderContext {
                 texture,
                 width: tex_info.width,
                 height: tex_info.height,
-                stereo_mode: crate::loaders::StereoMode::FSBS,
+                stereo_mode: crate::loaders::StereoMode::FullSbs,
             });
         }
 
-        return Err("Cannot open shared texture!".into());
+        Err("Cannot open shared texture!".into())
     }
 
     fn is_invalid(&self) -> bool {
         let address = unsafe { *(self.katanga_file_mapping as *mut usize) } | 0xFFFFFFFF00000000;
-        return self.current_address != address;
+        self.current_address != address
     }
 }
 

@@ -350,7 +350,7 @@ impl OpenXRContext {
                 create_flags: openxr::SwapchainCreateFlags::EMPTY,
                 usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
                     | openxr::SwapchainUsageFlags::SAMPLED,
-                format: vk_color_format.clone().as_raw() as _,
+                format: vk_color_format.as_raw() as _,
                 sample_count: 1,
                 width: resolution.width,
                 height: resolution.height,

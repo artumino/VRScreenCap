@@ -11,7 +11,9 @@ use engine::{
     WgpuContext, WgpuLoader,
 };
 use loaders::{ScreenParams, StereoMode};
+#[cfg(not(debug_assertions))]
 use log::LevelFilter;
+#[cfg(not(debug_assertions))]
 use log4rs::{
     append::file::FileAppender,
     config::{Appender, Root},
@@ -27,7 +29,7 @@ use thread_priority::*;
 use tray_item::TrayItem;
 use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
 
-use crate::{engine::geometry::Mesh, loaders::Loader};
+use crate::engine::geometry::Mesh;
 
 mod conversions;
 mod engine;
@@ -333,9 +335,10 @@ fn run(
             ..Default::default()
         });
 
-    let mut bind_group_layouts = vec![];
-    bind_group_layouts.push(texture_bind_group_layout);
-    bind_group_layouts.push(global_uniform_bind_group_layout);
+    let bind_group_layouts = vec![
+        texture_bind_group_layout,
+        global_uniform_bind_group_layout
+    ];
 
     // Not pretty at all, but it works.
     let texture_bind_group_layout = bind_group_layouts.get(0).unwrap();
@@ -433,7 +436,7 @@ fn run(
                 );
                 diffuse_bind_group = bind_texture(
                     wgpu_context,
-                    &texture_bind_group_layout,
+                    texture_bind_group_layout,
                     &screen_texture.create_view(&wgpu::TextureViewDescriptor::default()),
                     &diffuse_sampler,
                 );
@@ -542,8 +545,8 @@ fn run(
                     let (_, views) = xr_session
                         .locate_views(VIEW_TYPE, xr_frame_state.predicted_display_time, &xr_space)
                         .unwrap();
-                    let mut view_idx = 0;
-                    for view in views.iter() {
+
+                    for (view_idx, view) in views.iter().enumerate() {
                         let mut eye = cameras.get_mut(view_idx).unwrap();
                         eye.entity.position.x = view.pose.position.x;
                         eye.entity.position.y = view.pose.position.y;
@@ -556,8 +559,8 @@ fn run(
                         eye.update_projection_from_tangents(view.fov);
                         let camera_uniform = camera_uniform.get_mut(view_idx).unwrap();
                         camera_uniform.update_view_proj(eye);
-                        view_idx += 1;
                     }
+
                     wgpu_context.queue.write_buffer(
                         &camera_buffer,
                         0,
@@ -586,7 +589,7 @@ fn run(
                                         .fov(views[0].fov)
                                         .sub_image(
                                             openxr::SwapchainSubImage::new()
-                                                .swapchain(&xr_swapchain)
+                                                .swapchain(xr_swapchain)
                                                 .image_array_index(0)
                                                 .image_rect(rect),
                                         ),
@@ -595,7 +598,7 @@ fn run(
                                         .fov(views[1].fov)
                                         .sub_image(
                                             openxr::SwapchainSubImage::new()
-                                                .swapchain(&xr_swapchain)
+                                                .swapchain(xr_swapchain)
                                                 .image_array_index(1)
                                                 .image_rect(rect),
                                         ),
@@ -626,7 +629,7 @@ fn run(
                 ToggleSetting::FlipX => {
                     screen_params.flip_x = !screen_params.flip_x;
                     match stereo_mode {
-                        StereoMode::SBS | StereoMode::FSBS => {
+                        StereoMode::Sbs | StereoMode::FullSbs => {
                             screen_params.swap_eyes = !screen_params.swap_eyes;
                         }
                         _ => {}
@@ -640,7 +643,7 @@ fn run(
                 ToggleSetting::FlipY => {
                     screen_params.flip_y = !screen_params.flip_y;
                     match stereo_mode {
-                        StereoMode::TAB | StereoMode::FTAB => {
+                        StereoMode::Tab | StereoMode::FullTab => {
                             screen_params.swap_eyes = !screen_params.swap_eyes;
                         }
                         _ => {}
@@ -659,7 +662,7 @@ fn run(
 
 fn check_loader_invalidation(
     current_loader: Option<usize>,
-    loaders: &Vec<loaders::katanga_loader::KatangaLoaderContext>,
+    loaders: &[impl loaders::Loader],
     screen_invalidated: &mut bool,
 ) {
     if let Some(loader) = current_loader {
@@ -696,12 +699,11 @@ fn bind_texture(
         })
 }
 
-fn try_to_load_texture<'a>(
-    loaders: &'a mut Vec<loaders::katanga_loader::KatangaLoaderContext>,
+fn try_to_load_texture(
+    loaders: &mut [impl loaders::Loader],
     wgpu_context: &WgpuContext,
 ) -> Option<(wgpu::Texture, f32, StereoMode, usize)> {
-    let mut loader_idx = 0;
-    for loader in loaders.iter_mut() {
+    for (loader_idx, loader) in loaders.iter_mut().enumerate() {
         if let Ok(tex_source) = loader.load(&wgpu_context.instance, &wgpu_context.device) {
             return Some((
                 tex_source.texture,
@@ -710,7 +712,6 @@ fn try_to_load_texture<'a>(
                 loader_idx,
             ));
         }
-        loader_idx += 1;
     }
     None
 }
