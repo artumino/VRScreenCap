@@ -114,8 +114,8 @@ impl Mesh {
 
         Mesh {
             //FIXME: Handle flipping properly
-            vertices: vertices,
-            indices: indices,
+            vertices,
+            indices,
         }
     }
 }

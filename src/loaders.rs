@@ -15,10 +15,10 @@ pub struct TextureSource {
 #[allow(unused)]
 pub enum StereoMode {
     Mono,
-    SBS,
-    TAB,
-    FSBS,
-    FTAB,
+    Sbs,
+    Tab,
+    FullSbs,
+    FullTab,
 }
 
 pub trait Loader {
