@@ -14,6 +14,7 @@ use crate::conversions::vulkan_image_to_texture;
 use super::{WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION};
 
 pub struct OpenXRContext {
+    pub entry: openxr::Entry,
     pub instance: openxr::Instance,
     pub props: openxr::InstanceProperties,
     pub system: openxr::SystemId,
@@ -73,6 +74,7 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     );
 
     Ok(OpenXRContext {
+        entry,
         instance,
         props,
         system,
@@ -167,8 +169,8 @@ impl WgpuLoader for OpenXRContext {
         }
 
         log::info!(
-            "Got Vulkan physical device with version {}",
-            vk_device_properties.api_version
+            "Got Vulkan physical device with properties {:?}",
+            vk_device_properties
         );
 
         let queue_family_index = unsafe {
@@ -204,11 +206,13 @@ impl WgpuLoader for OpenXRContext {
         let hal_exposed_adapter = hal_instance.expose_adapter(vk_physical_device).unwrap();
 
         log::info!("Created WGPU-HAL instance and adapter");
-
+        
         let device_descriptor = wgpu::DeviceDescriptor {
             features: wgpu::Features::MULTIVIEW,
             ..Default::default()
         };
+
+        //TODO actually check if the extensions are available and avoid using then in the loaders
         let mut device_extensions = hal_exposed_adapter
             .adapter
             .required_device_extensions(device_descriptor.features);
@@ -223,35 +227,12 @@ impl WgpuLoader for OpenXRContext {
             .map(|x| x.as_ptr())
             .collect::<Vec<_>>();
 
-        //  TODO: how do we get limits from actual device?
         let uab_types = hal::UpdateAfterBindTypes::from_limits(
-            &device_descriptor.limits,
-            &vk::PhysicalDeviceLimits::default(),
+            &wgpu::Limits::default(),
+            &vk_device_properties.limits,
         );
 
-        let mut physical_features = hal_exposed_adapter.adapter.physical_device_features(
-            &device_extensions,
-            device_descriptor.features,
-            uab_types,
-        );
-
-        let family_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(queue_family_index)
-            .queue_priorities(&[1.0])
-            .build();
-        let family_infos = [family_info];
-
-        let mut multiview = vk::PhysicalDeviceMultiviewFeatures {
-            multiview: vk::TRUE,
-            ..Default::default()
-        };
         let vk_device = {
-            let info = vk::DeviceCreateInfo::builder()
-                .queue_create_infos(&family_infos)
-                .enabled_extension_names(&device_extensions_ptrs)
-                .push_next(&mut multiview);
-            let info = physical_features.add_to_device_create_builder(info).build();
-
             unsafe {
                 let vk_device = self
                     .instance
@@ -259,11 +240,22 @@ impl WgpuLoader for OpenXRContext {
                         self.system,
                         std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
                         vk_physical_device.as_raw() as _,
-                        &info as *const _ as *const _,
+                        &vk::DeviceCreateInfo::builder()
+                        .queue_create_infos(&[vk::DeviceQueueCreateInfo::builder()
+                            .queue_family_index(queue_family_index)
+                            .queue_priorities(&[1.0])
+                            .build()])
+                        .enabled_extension_names(&device_extensions_ptrs)
+                        .push_next(&mut vk::PhysicalDeviceMultiviewFeatures {
+                            multiview: vk::TRUE,
+                            ..Default::default()
+                        }) 
+                        as *const _ as *const _,
                     )
                     .unwrap()
                     .unwrap();
-
+                
+                log::info!("Creating ash vulkan device device from native");
                 ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
             }
         };
