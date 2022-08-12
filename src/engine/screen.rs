@@ -18,7 +18,7 @@ impl Screen {
                 cgmath::Vector3 {
                     x: 0.0,
                     y: 0.0,
-                    z: -distance,
+                    z: distance,
                 },
                 cgmath::Quaternion::zero(),
                 cgmath::Vector3 {

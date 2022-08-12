@@ -706,7 +706,7 @@ fn run(
                         );
 
                         screen.change_scale(screen_params.scale);
-                        screen.change_distance(screen_params.distance);
+                        screen.change_distance(-screen_params.distance);
                         wgpu_context.queue.write_buffer(
                             &screen_model_matrix_buffer,
                             0,
