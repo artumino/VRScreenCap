@@ -8,6 +8,7 @@ pub struct Entity {
     pub scale: Vector3<f32>,
     pub world_matrix: Matrix4<f32>,
     pub local_matrix: Matrix4<f32>,
+    uniform_matrix: ModelUniform
 }
 
 impl Default for Entity {
@@ -29,7 +30,7 @@ impl Entity {
         rotation: Quaternion<f32>,
         scale: Vector3<f32>,
     ) -> Self {
-        Entity {
+        let mut entity = Entity {
             id,
             parent_id: None,
             position,
@@ -37,7 +38,11 @@ impl Entity {
             scale,
             world_matrix: Matrix4::identity(),
             local_matrix: Matrix4::identity(),
-        }
+            uniform_matrix: ModelUniform::new()
+        };
+
+        entity.update_matrices(&[]);
+        entity
     }
 
     pub fn update_matrices(&mut self, registry: &[Entity]) {
@@ -49,6 +54,30 @@ impl Entity {
             self.world_matrix = registry[parent_id].world_matrix * self.local_matrix;
         } else {
             self.world_matrix = self.local_matrix;
+        }
+
+        self.uniform_matrix.model_matrix = self.world_matrix.into();
+    }
+
+    pub fn uniform(&self) -> ModelUniform {
+        self.uniform_matrix
+    }
+}
+
+// We need this for Rust to store our data correctly for the shaders
+#[repr(C)]
+// This is so we can store this in a buffer
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ModelUniform {
+    // We can't use cgmath with bytemuck directly so we'll have
+    // to convert the Matrix4 into a 4x4 f32 array
+    model_matrix: [[f32; 4]; 4],
+}
+
+impl ModelUniform {
+    pub fn new() -> Self {
+        Self {
+            model_matrix: cgmath::Matrix4::identity().into(),
         }
     }
 }

@@ -126,7 +126,6 @@ impl WgpuLoader for OpenXRContext {
                 .unwrap();
 
         log::info!("Requested instance extensions: {:?}", instance_extensions);
-
         let instance_extensions_ptrs = instance_extensions
             .iter()
             .map(|x| x.as_ptr())
@@ -252,8 +251,9 @@ impl WgpuLoader for OpenXRContext {
                         }) 
                         as *const _ as *const _,
                     )
-                    .unwrap()
-                    .unwrap();
+                    .expect("XR error creating Vulkan device")
+                    .map_err(vk::Result::from_raw)
+                    .expect("Vulkan error creating Vulkan device");
                 
                 log::info!("Creating ash vulkan device device from native");
                 ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))

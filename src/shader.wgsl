@@ -3,6 +3,10 @@ struct CameraUniform {
     view_proj: mat4x4<f32>,
 };
 
+struct ModelUniform {
+    model_matrix: mat4x4<f32>,
+};
+
 struct ScreenParams {
     x_curvature: f32,
     y_curvature: f32,
@@ -15,6 +19,9 @@ struct ScreenParams {
 var<uniform> camera: array<CameraUniform, 2>;
 @group(1) @binding(1)
 var<uniform> screen_params: ScreenParams;
+//Could be a push constant but we only have one entity
+@group(1) @binding(2)
+var<uniform> model_uniform: ModelUniform;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -25,7 +32,6 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
 };
-
 
 @vertex
 fn vs_main(
@@ -38,7 +44,7 @@ fn vs_main(
     let y_diff = (model.tex_coords.y - 0.5) * 2.0;
     let z_x_curvature = (1.0 - x_diff * x_diff) * screen_params.x_curvature;
     let z_y_curvature = (1.0 - y_diff * y_diff) * screen_params.y_curvature;
-    out.clip_position = camera[view_index].view_proj * vec4<f32>(model.position.xy, model.position.z - z_x_curvature - z_y_curvature, 1.0);
+    out.clip_position = camera[view_index].view_proj * model_uniform.model_matrix * vec4<f32>(model.position.xy, model.position.z - z_x_curvature - z_y_curvature, 1.0);
     return out;
 }
 

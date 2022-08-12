@@ -2,6 +2,7 @@ use ash::vk;
 
 pub mod geometry;
 pub mod camera;
+pub mod screen;
 pub mod entity;
 pub mod vr;
 

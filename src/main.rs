@@ -8,9 +8,10 @@ use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
     vr::{enable_xr_runtime, OpenXRContext},
-    WgpuContext, WgpuLoader,
+    WgpuContext, WgpuLoader, screen::Screen,
 };
-use loaders::{ScreenParams, StereoMode};
+use loaders::StereoMode;
+use config::AppConfig;
 #[cfg(not(debug_assertions))]
 use log::LevelFilter;
 #[cfg(not(debug_assertions))]
@@ -29,11 +30,12 @@ use thread_priority::*;
 use tray_item::TrayItem;
 use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
 
-use crate::engine::geometry::Mesh;
+use crate::config::ConfigContext;
 
 mod conversions;
 mod engine;
 mod loaders;
+mod config;
 
 enum TrayMessages {
     Quit,
@@ -84,9 +86,10 @@ fn main() {
     let mut xr_context = enable_xr_runtime().unwrap();
     let wgpu_context = xr_context.load_wgpu().unwrap();
     let (_tray, tray_state) = build_tray();
+    let mut config_context = config::ConfigContext::try_setup().unwrap_or(None);
 
     log::info!("Finished initial setup, running main loop");
-    run(&mut xr_context, &wgpu_context, &tray_state);
+    run(&mut xr_context, &wgpu_context, &tray_state, &mut config_context);
 }
 
 fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
@@ -152,6 +155,7 @@ fn run(
     xr_context: &mut OpenXRContext,
     wgpu_context: &WgpuContext,
     tray_state: &Arc<Mutex<TrayState>>,
+    config: &mut Option<ConfigContext>,
 ) {
     // Load the shaders from disk
     let shader = wgpu_context
@@ -218,16 +222,19 @@ fn run(
         current_loader = Some(loader);
     }
 
-    let mut screen_params = ScreenParams::parse();
-    let mut screen = Mesh::get_plane_rectangle(
-        100,
-        100,
-        aspect_ratio,
-        screen_params.scale,
+    let mut screen_params = match config {
+        Some(ConfigContext{
+            last_config: Some(config),
+            ..}) => config.clone(),
+        _ => AppConfig::parse()
+    };
+    let mut screen = Screen::new(
         -screen_params.distance,
+        screen_params.scale,
+        aspect_ratio,
     );
     let (mut screen_vertex_buffer, mut screen_index_buffer) =
-        screen.get_buffers(&wgpu_context.device);
+        screen.mesh.get_buffers(&wgpu_context.device);
 
     let screen_params_buffer =
         wgpu_context
@@ -237,6 +244,14 @@ fn run(
                 contents: bytemuck::cast_slice(&[screen_params.uniform()]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
+
+    let screen_model_matrix_buffer = wgpu_context
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Screen Model Matrix Buffer"),
+            contents: bytemuck::cast_slice(&[screen.entity.uniform()]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
     let mut cameras = vec![Camera::default(), Camera::default()];
     let mut camera_uniform = vec![CameraUniform::new(), CameraUniform::new()];
@@ -301,6 +316,16 @@ fn run(
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
                 label: Some("global_uniform_bind_group_layout"),
             });
@@ -318,6 +343,10 @@ fn run(
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: screen_params_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: screen_model_matrix_buffer.as_entire_binding(),
                     },
                 ],
                 label: Some("global_uniform_bind_group"),
@@ -427,13 +456,7 @@ fn run(
                 aspect_ratio = aspect;
                 stereo_mode = mode;
                 current_loader = Some(loader);
-                screen = Mesh::get_plane_rectangle(
-                    100,
-                    100,
-                    aspect_ratio,
-                    screen_params.scale,
-                    -screen_params.distance,
-                );
+                screen.change_aspect_ratio(aspect_ratio);
                 diffuse_bind_group = bind_texture(
                     wgpu_context,
                     texture_bind_group_layout,
@@ -441,7 +464,14 @@ fn run(
                     &diffuse_sampler,
                 );
                 (screen_vertex_buffer, screen_index_buffer) =
-                    screen.get_buffers(&wgpu_context.device);
+                    screen.mesh.get_buffers(&wgpu_context.device);
+
+                
+                wgpu_context.queue.write_buffer(
+                    &screen_model_matrix_buffer,
+                    0,
+                    bytemuck::cast_slice(&[screen.entity.uniform()]),
+                )
             }
             screen_invalidated = false;
         }
@@ -533,7 +563,7 @@ fn run(
                             screen_index_buffer.slice(..),
                             wgpu::IndexFormat::Uint16,
                         );
-                        rpass.draw_indexed(0..screen.indices(), 0, 0..1);
+                        rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
 
                     // Fetch the view transforms. To minimize latency, we intentionally do this
@@ -656,6 +686,35 @@ fn run(
                 }
             },
             _ => {}
+        }
+
+        if let Some(ConfigContext{
+            config_notifier: Some(config_receiver),
+            ..
+        }) = config {
+            if config_receiver.try_recv().is_ok() {
+                let config = config.as_mut().unwrap();
+                let config_changed = config.update_config().is_ok();
+
+                if config_changed {
+                    if let Some(new_params) = config.last_config.clone() {
+                        screen_params = new_params;
+                        wgpu_context.queue.write_buffer(
+                            &screen_params_buffer,
+                            0,
+                            bytemuck::cast_slice(&[screen_params.uniform()]),
+                        );
+
+                        screen.change_scale(screen_params.scale);
+                        screen.change_distance(screen_params.distance);
+                        wgpu_context.queue.write_buffer(
+                            &screen_model_matrix_buffer,
+                            0,
+                            bytemuck::cast_slice(&[screen.entity.uniform()]),
+                        );
+                    }
+                }
+            }
         }
     }
 }

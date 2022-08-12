@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "name": "Debug",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/debug/vr-screen-cap.exe",
+            "cwd": "${workspaceRoot}/target/debug",
+            "preLaunchTask": "build",
+            "args": ["--config-file", "E:/ArtumRepos/Rust/VRScreenCap/target/release/config.json"],
+        },
+    
+    ],
+}
