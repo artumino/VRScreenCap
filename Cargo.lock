@@ -2157,7 +2157,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vr-screen-cap"
-version = "0.3.0-dev"
+version = "0.3.0-dev2"
 dependencies = [
  "ash",
  "bytemuck",
