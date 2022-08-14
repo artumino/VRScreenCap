@@ -4,6 +4,7 @@ pub mod geometry;
 pub mod camera;
 pub mod screen;
 pub mod entity;
+pub mod input;
 pub mod vr;
 
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);

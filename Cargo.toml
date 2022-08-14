@@ -11,7 +11,7 @@ wgpu-hal = { version = "0.13.1", features = ["vulkan"] }
 ash = "0.37.0"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
-openxr = { version = "0.16.0", features=["static"] }
+openxr = { version = "0.16.0", features=["static", "mint"] }
 bytemuck = { version = "1.11.0", features = [ "derive" ] }
 tray-item = "0.7.0"
 log4rs = "1.1.1"

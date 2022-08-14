@@ -3,15 +3,17 @@ use ::windows::Win32::System::Threading::{
     GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS,
 };
 use ash::vk::Handle;
+use cgmath::Rotation3;
 use clap::Parser;
+use config::AppConfig;
 use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
+    screen::Screen,
     vr::{enable_xr_runtime, OpenXRContext},
-    WgpuContext, WgpuLoader, screen::Screen,
+    WgpuContext, WgpuLoader,
 };
 use loaders::StereoMode;
-use config::AppConfig;
 #[cfg(not(debug_assertions))]
 use log::LevelFilter;
 #[cfg(not(debug_assertions))]
@@ -21,6 +23,7 @@ use log4rs::{
     encode::pattern::PatternEncoder,
     Config,
 };
+use openxr::ReferenceSpaceType;
 use std::{
     borrow::Cow,
     num::NonZeroU32,
@@ -32,14 +35,15 @@ use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
 
 use crate::config::ConfigContext;
 
+mod config;
 mod conversions;
 mod engine;
 mod loaders;
-mod config;
 
 enum TrayMessages {
     Quit,
     Reload,
+    Recenter(bool),
     ToggleSettings(ToggleSetting),
 }
 
@@ -89,19 +93,18 @@ fn main() {
     let mut config_context = config::ConfigContext::try_setup().unwrap_or(None);
 
     log::info!("Finished initial setup, running main loop");
-    run(&mut xr_context, &wgpu_context, &tray_state, &mut config_context);
+    run(
+        &mut xr_context,
+        &wgpu_context,
+        &tray_state,
+        &mut config_context,
+    );
 }
 
 fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
     log::info!("Building system tray");
     let mut tray = TrayItem::new("VR Screen Cap", "tray-icon").unwrap();
     let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
-
-    let cloned_state = tray_state.clone();
-    tray.add_menu_item("Quit", move || {
-        cloned_state.lock().unwrap().message = Some(TrayMessages::Quit);
-    })
-    .unwrap();
 
     tray.add_label("Settings").unwrap();
 
@@ -126,9 +129,29 @@ fn build_tray() -> (TrayItem, Arc<Mutex<TrayState>>) {
     })
     .unwrap();
 
+    tray.add_label("Actions").unwrap();
+
     let cloned_state = tray_state.clone();
     tray.add_menu_item("Reload Screen", move || {
         cloned_state.lock().unwrap().message = Some(TrayMessages::Reload);
+    })
+    .unwrap();
+
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Recenter", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::Recenter(true));
+    })
+    .unwrap();
+
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Recenter w/ Pitch", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::Recenter(false));
+    })
+    .unwrap();
+
+    let cloned_state = tray_state.clone();
+    tray.add_menu_item("Quit", move || {
+        cloned_state.lock().unwrap().message = Some(TrayMessages::Quit);
     })
     .unwrap();
 
@@ -223,16 +246,13 @@ fn run(
     }
 
     let mut screen_params = match config {
-        Some(ConfigContext{
+        Some(ConfigContext {
             last_config: Some(config),
-            ..}) => config.clone(),
-        _ => AppConfig::parse()
+            ..
+        }) => config.clone(),
+        _ => AppConfig::parse(),
     };
-    let mut screen = Screen::new(
-        -screen_params.distance,
-        screen_params.scale,
-        aspect_ratio,
-    );
+    let mut screen = Screen::new(-screen_params.distance, screen_params.scale, aspect_ratio);
     let (mut screen_vertex_buffer, mut screen_index_buffer) =
         screen.mesh.get_buffers(&wgpu_context.device);
 
@@ -245,13 +265,14 @@ fn run(
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-    let screen_model_matrix_buffer = wgpu_context
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Screen Model Matrix Buffer"),
-            contents: bytemuck::cast_slice(&[screen.entity.uniform()]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+    let screen_model_matrix_buffer =
+        wgpu_context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Screen Model Matrix Buffer"),
+                contents: bytemuck::cast_slice(&[screen.entity.uniform()]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
     let mut cameras = vec![Camera::default(), Camera::default()];
     let mut camera_uniform = vec![CameraUniform::new(), CameraUniform::new()];
@@ -364,10 +385,7 @@ fn run(
             ..Default::default()
         });
 
-    let bind_group_layouts = vec![
-        texture_bind_group_layout,
-        global_uniform_bind_group_layout
-    ];
+    let bind_group_layouts = vec![texture_bind_group_layout, global_uniform_bind_group_layout];
 
     // Not pretty at all, but it works.
     let texture_bind_group_layout = bind_group_layouts.get(0).unwrap();
@@ -428,7 +446,13 @@ fn run(
     };
 
     // Create a room-scale reference space
-    let xr_space = xr_session
+    let xr_reference_space = xr_session
+        .create_reference_space(openxr::ReferenceSpaceType::LOCAL, openxr::Posef::IDENTITY)
+        .unwrap();
+    let xr_view_space = xr_session
+        .create_reference_space(openxr::ReferenceSpaceType::VIEW, openxr::Posef::IDENTITY)
+        .unwrap();
+    let mut xr_space = xr_session
         .create_reference_space(openxr::ReferenceSpaceType::LOCAL, openxr::Posef::IDENTITY)
         .unwrap();
 
@@ -436,6 +460,7 @@ fn run(
     let mut session_running = false;
     let mut swapchain = None;
     let mut screen_invalidated = false;
+    let mut last_predicted_frame_time = openxr::Time::from_nanos(0);
     let mut last_invalidation_check = std::time::Instant::now();
 
     // Handle OpenXR events
@@ -466,7 +491,6 @@ fn run(
                 (screen_vertex_buffer, screen_index_buffer) =
                     screen.mesh.get_buffers(&wgpu_context.device);
 
-                
                 wgpu_context.queue.write_buffer(
                     &screen_model_matrix_buffer,
                     0,
@@ -501,6 +525,15 @@ fn run(
             Some(openxr::Event::EventsLost(e)) => {
                 log::error!("Lost {} OpenXR events", e.lost_event_count());
             }
+            Some(openxr::Event::ReferenceSpaceChangePending(_)) => {
+                //Reset XR space to follow runtime
+                xr_space = xr_session
+                    .create_reference_space(
+                        openxr::ReferenceSpaceType::LOCAL,
+                        openxr::Posef::IDENTITY,
+                    )
+                    .unwrap();
+            }
             _ => {
                 // Render to HMD only if we have an active session
                 if session_running {
@@ -508,6 +541,12 @@ fn run(
                     // another one. Also returns a prediction of when the next frame will be
                     // displayed, for use with predicting locations of controllers, viewpoints, etc.
                     let xr_frame_state = frame_wait.wait().unwrap();
+                    last_predicted_frame_time = xr_frame_state.predicted_display_time;
+
+                    //XR Input processing
+                    //if let Ok(view_acelleration) = input::get_view_acceleration_vector(&xr_reference_space, &xr_view_space, &xr_frame_state) {
+                    //    log::debug!("HMD Acceleration: {:?}", view_acelleration);
+                    //}
 
                     // Must be called before any rendering is done!
                     frame_stream.begin().unwrap();
@@ -639,6 +678,7 @@ fn run(
             }
         }
 
+        // Non-XR Input processing
         match tray_state.lock().unwrap().message.take() {
             Some(TrayMessages::Quit) => {
                 log::info!("Qutting app manually...");
@@ -646,6 +686,9 @@ fn run(
             }
             Some(TrayMessages::Reload) => {
                 check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated);
+            }
+            Some(TrayMessages::Recenter(horizon_locked)) => {
+                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, horizon_locked, &mut xr_space);
             }
             Some(TrayMessages::ToggleSettings(setting)) => match setting {
                 ToggleSetting::SwapEyes => {
@@ -688,10 +731,11 @@ fn run(
             _ => {}
         }
 
-        if let Some(ConfigContext{
+        if let Some(ConfigContext {
             config_notifier: Some(config_receiver),
             ..
-        }) = config {
+        }) = config
+        {
             if config_receiver.try_recv().is_ok() {
                 let config = config.as_mut().unwrap();
                 let config_changed = config.update_config().is_ok();
@@ -717,6 +761,35 @@ fn run(
             }
         }
     }
+}
+
+fn recenter_scene(xr_session: &openxr::Session<openxr::Vulkan>, xr_reference_space: &openxr::Space, xr_view_space: &openxr::Space, last_predicted_frame_time: openxr::Time, horizon_locked: bool, xr_space: &mut openxr::Space) {
+    let mut view_location_pose = xr_view_space
+        .locate(xr_reference_space, last_predicted_frame_time)
+        .unwrap()
+        .pose;
+    let quaternion = cgmath::Quaternion::from(mint::Quaternion::from(
+        view_location_pose.orientation,
+    ));
+    let forward = cgmath::Vector3::new(0.0, 0.0, 1.0);
+    let look_dir = quaternion * forward;
+    let yaw = cgmath::Rad(look_dir.x.atan2(look_dir.z));
+    let clean_orientation = if horizon_locked {
+        cgmath::Quaternion::from_angle_y(yaw)
+    } else {
+        let padj = (look_dir.x * look_dir.x + look_dir.z * look_dir.z).sqrt();
+        let pitch = -cgmath::Rad(look_dir.y.atan2(padj));
+        cgmath::Quaternion::from_angle_y(yaw) * cgmath::Quaternion::from_angle_x(pitch)
+    };
+    view_location_pose.orientation = openxr::Quaternionf {
+        x: clean_orientation.v.x,
+        y: clean_orientation.v.y,
+        z: clean_orientation.v.z,
+        w: clean_orientation.s,
+    };
+    *xr_space = xr_session
+        .create_reference_space(ReferenceSpaceType::LOCAL, view_location_pose)
+        .unwrap();
 }
 
 fn check_loader_invalidation(
