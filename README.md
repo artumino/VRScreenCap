@@ -20,6 +20,11 @@ DX11 games.
 The feed should then be visible on a curved screen. In case the video feed freezes, restart VRScreenCap.
 Some VR runtimes don't seem to allow for screen recentering, a future update will probably take care of this in-app.
 
+### Recentering
+You can recenter the viewer at any point in time by holding one or two hand controller near the HMD for more than 3 seconds.
+Doing it with one hand will keep the screen locked to the horizon, while using two hands will allow you to also change the screen's pitch.
+Recentering can also be triggered by selecting the proper options from the menu in the icon tray.
+
 **ATTENTION**: VRScreenCap doesn't open any window on the desktop, it only appears as a tray icon (and in your VR runtime's dashboard).
 
 
@@ -42,7 +47,6 @@ Where every distance is in meters. The effects of horizontal and vertical curvat
 
 A json configuration file can be provided and it will be watched for changes, the structure of the json config is similar to the launch parameters:
 ```json
-vr-screen-cap.exe [OPTIONS]
 {
     "distance" : 20.0,
     "scale": 10.0,

@@ -11,7 +11,7 @@ use engine::{
     geometry::Vertex,
     screen::Screen,
     vr::{enable_xr_runtime, OpenXRContext},
-    WgpuContext, WgpuLoader,
+    WgpuContext, WgpuLoader, input::InputContext,
 };
 use loaders::StereoMode;
 #[cfg(not(debug_assertions))]
@@ -462,7 +462,16 @@ fn run(
     let mut screen_invalidated = false;
     let mut last_predicted_frame_time = openxr::Time::from_nanos(0);
     let mut last_invalidation_check = std::time::Instant::now();
+    let mut input_context = InputContext::init(&xr_context.instance)
+        .map(Some)
+        .unwrap_or(None);
 
+    if input_context.is_some() {
+        let mut attach_context = input_context.take().unwrap();
+        if attach_context.attach_to_session(&xr_session).is_ok() {
+            input_context = Some(attach_context);
+        }
+    }
     // Handle OpenXR events
     loop {
         let time = std::time::Instant::now();
@@ -547,6 +556,17 @@ fn run(
                     //if let Ok(view_acelleration) = input::get_view_acceleration_vector(&xr_reference_space, &xr_view_space, &xr_frame_state) {
                     //    log::debug!("HMD Acceleration: {:?}", view_acelleration);
                     //}
+                    if input_context.is_some() {
+                        let input_context = input_context.as_mut().unwrap();
+                        input_context.process_inputs(&xr_session, &xr_frame_state, &xr_reference_space, &xr_view_space);
+
+                        if let Some(new_state) = &input_context.input_state {
+                            if new_state.hands_near_head > 0 && new_state.near_start.elapsed().as_secs() > 3 {
+                                let should_unlock_horizon = new_state.hands_near_head > 1 || (new_state.hands_near_head == 1 && new_state.count_change.elapsed().as_secs() < 1);
+                                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, !should_unlock_horizon, 200_000_000, &mut xr_space)
+                            }
+                        }
+                    }
 
                     // Must be called before any rendering is done!
                     frame_stream.begin().unwrap();
@@ -688,7 +708,7 @@ fn run(
                 check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated);
             }
             Some(TrayMessages::Recenter(horizon_locked)) => {
-                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, horizon_locked, &mut xr_space);
+                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, horizon_locked, 0, &mut xr_space);
             }
             Some(TrayMessages::ToggleSettings(setting)) => match setting {
                 ToggleSetting::SwapEyes => {
@@ -763,9 +783,9 @@ fn run(
     }
 }
 
-fn recenter_scene(xr_session: &openxr::Session<openxr::Vulkan>, xr_reference_space: &openxr::Space, xr_view_space: &openxr::Space, last_predicted_frame_time: openxr::Time, horizon_locked: bool, xr_space: &mut openxr::Space) {
+fn recenter_scene(xr_session: &openxr::Session<openxr::Vulkan>, xr_reference_space: &openxr::Space, xr_view_space: &openxr::Space, last_predicted_frame_time: openxr::Time, horizon_locked: bool, delay: i64, xr_space: &mut openxr::Space) {
     let mut view_location_pose = xr_view_space
-        .locate(xr_reference_space, last_predicted_frame_time)
+        .locate(xr_reference_space, openxr::Time::from_nanos(last_predicted_frame_time.as_nanos() - delay))
         .unwrap()
         .pose;
     let quaternion = cgmath::Quaternion::from(mint::Quaternion::from(
