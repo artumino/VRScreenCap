@@ -34,11 +34,11 @@ pub struct AppConfig {
     // default: false, usage: --flip-y=false
     #[clap(long, value_parser, default_value_t = false)]
     pub flip_y: bool,
-    // Distance from user in meters -Z forward, default: 20.0, usage: --distance=20.0
+    // Distance from user in meters, default: 20.0, usage: --distance=20.0
     #[clap(short, long, value_parser, default_value_t = 20.0)]
     pub distance: f32,
-    // Screen scaling factor (a screen with aspect ratio 1:1 with scaling factor 1.0 would be 2m wide), default: 10.0, usage: --scale=10.0
-    #[clap(short, long, value_parser, default_value_t = 10.0)]
+    // Screen scaling factor (screen width in meters), default: 40.0, usage: --scale=40.0
+    #[clap(short, long, value_parser, default_value_t = 40.0)]
     pub scale: f32,
     // Configuration file to watch for live changes, usage: --config-file=config.json
     #[clap(short, long, value_parser)]
@@ -75,7 +75,7 @@ impl Default for AppConfig {
             flip_x: false,
             flip_y: false,
             distance: 20.0,
-            scale: 10.0,
+            scale: 40.0,
             config_file: None,
         }
     }
