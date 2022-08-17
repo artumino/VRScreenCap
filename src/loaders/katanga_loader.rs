@@ -10,12 +10,13 @@ use windows::Win32::{
         Direct3D11::{
             D3D11CreateDevice, ID3D11Texture2D, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
             D3D11_TEXTURE2D_DESC,
-        }
+        },
+        Direct3D12::{D3D12CreateDevice, ID3D12Device, ID3D12Resource},
     },
     System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS},
 };
 
-use crate::conversions::{vulkan_image_to_texture, map_texture_format, unmap_texture_format};
+use crate::conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture};
 
 use super::{Loader, TextureSource};
 
@@ -35,18 +36,37 @@ impl Loader for KatangaLoaderContext {
             unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile")? };
         log::info!("Handle: {:?}", self.katanga_file_handle);
 
-        self.katanga_file_mapping =
-            unsafe { MapViewOfFile(self.katanga_file_handle, FILE_MAP_ALL_ACCESS, 0, 0, 4) };
+        self.katanga_file_mapping = unsafe {
+            MapViewOfFile(
+                self.katanga_file_handle,
+                FILE_MAP_ALL_ACCESS,
+                0,
+                0,
+                std::mem::size_of::<usize>(),
+            )
+        };
         if self.katanga_file_mapping.is_null() {
             return Err("Cannot map file!".into());
         }
 
         let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
-        self.current_address = address | 0xFFFFFFFF00000000;
+        self.current_address = address;
         let tex_handle = self.current_address as vk::HANDLE;
         log::info!("{:#01x}", tex_handle as usize);
 
-        let tex_info = get_d3d11_texture_info(HANDLE(tex_handle as isize))?;
+        let tex_info = get_d3d11_texture_info(HANDLE(tex_handle as isize)).or_else(|err| {
+            log::warn!("Not a D3D11Texture {}", err);
+            get_d3d12_texture_info().map_err(|err| {
+                log::warn!("Not a D3D12Texture {}", err);
+                err
+            })
+        })?;
+
+        let tex_handle = tex_info.actual_handle as vk::HANDLE;
+        if tex_info.actual_handle != self.current_address {
+            log::info!("Actual Handle: {:?}", self.katanga_file_handle);
+        }
+
         let vk_format = map_texture_format(tex_info.format);
 
         log::info!("Mapped DXGI format to {:?}", tex_info.format);
@@ -57,7 +77,10 @@ impl Loader for KatangaLoaderContext {
                 device.map(|device| {
                     let raw_device = device.raw_device();
                     //let raw_phys_device = device.raw_physical_device();
-                    let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT;
+                    let handle_type = match tex_info.external_api {
+                        ExternalApi::D3D11 => vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT,
+                        ExternalApi::D3D12 => vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE_KHR,
+                    };
 
                     let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
                         .handle_type(handle_type)
@@ -99,7 +122,9 @@ impl Loader for KatangaLoaderContext {
         };
 
         if let Some(Ok(raw_image)) = raw_image {
-            let texture = vulkan_image_to_texture(device, raw_image, 
+            let texture = vulkan_image_to_texture(
+                device,
+                raw_image,
                 wgpu::TextureDescriptor {
                     label: "KatangaStream".into(),
                     size: wgpu::Extent3d {
@@ -126,7 +151,8 @@ impl Loader for KatangaLoaderContext {
                     format: tex_info.format,
                     usage: TextureUses::EXCLUSIVE,
                     memory_flags: MemoryFlags::empty(),
-            });
+                },
+            );
 
             return Ok(TextureSource {
                 texture,
@@ -140,7 +166,7 @@ impl Loader for KatangaLoaderContext {
     }
 
     fn is_invalid(&self) -> bool {
-        let address = unsafe { *(self.katanga_file_mapping as *mut usize) } | 0xFFFFFFFF00000000;
+        let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
         self.current_address != address
     }
 }
@@ -173,16 +199,23 @@ impl Drop for KatangaLoaderContext {
     }
 }
 
-struct D3D11TextureInfoAdapter {
+struct ExternalTextureInfo {
+    external_api: ExternalApi,
     width: u32,
     height: u32,
     array_size: u32,
     sample_count: u32,
     mip_levels: u32,
     format: TextureFormat,
+    actual_handle: usize,
 }
 
-fn get_d3d11_texture_info(handle: HANDLE) -> Result<D3D11TextureInfoAdapter, Box<dyn Error>> {
+enum ExternalApi {
+    D3D11,
+    D3D12,
+}
+
+fn get_d3d11_texture_info(handle: HANDLE) -> Result<ExternalTextureInfo, Box<dyn Error>> {
     let mut d3d11_device = None;
     let mut d3d11_device_context = None;
     unsafe {
@@ -200,21 +233,65 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<D3D11TextureInfoAdapter, Box
     };
     let mut d3d11_texture: Option<ID3D11Texture2D> = None;
     unsafe {
-        d3d11_device
+        d3d11_device.as_ref()
             .unwrap()
             .OpenSharedResource(handle, &mut d3d11_texture)
     }?;
     let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
     unsafe { d3d11_texture.unwrap().GetDesc(&mut texture_desc) };
 
-    log::info!("Got texture from DX11 with format {:?}", texture_desc.Format);
+    log::info!(
+        "Got texture from DX11 with format {:?}",
+        texture_desc.Format
+    );
 
-    Ok(D3D11TextureInfoAdapter {
+    Ok(ExternalTextureInfo {
+        external_api: ExternalApi::D3D11,
         width: texture_desc.Width,
         height: texture_desc.Height,
         array_size: texture_desc.ArraySize,
         sample_count: texture_desc.SampleDesc.Count,
         mip_levels: texture_desc.MipLevels,
         format: unmap_texture_format(texture_desc.Format),
+        actual_handle: handle.0 as usize
+    })
+}
+
+fn get_d3d12_texture_info() -> Result<ExternalTextureInfo, Box<dyn Error>> {
+    let mut d3d12_device: Option<ID3D12Device> = None;
+    unsafe {
+        D3D12CreateDevice(
+            None,
+            windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_12_0,
+            &mut d3d12_device,
+        )
+    }?;
+
+    let named_handle = unsafe {
+        d3d12_device.as_ref()
+            .unwrap()
+            .OpenSharedHandleByName("DX12VRStream", 0x10000000) //GENERIC_ALL
+    }?;
+
+    let mut d3d12_texture: Option<ID3D12Resource> = None;
+    unsafe {
+        d3d12_device.as_ref()
+            .unwrap()
+            .OpenSharedHandle(named_handle, &mut d3d12_texture)
+    }?;
+
+    let tex_info = unsafe { d3d12_texture.unwrap().GetDesc() };
+
+    log::info!("Got texture from DX12 with format {:?}", tex_info.Format);
+
+    Ok(ExternalTextureInfo {
+        external_api: ExternalApi::D3D12,
+        width: tex_info.Width as u32,
+        height: tex_info.Height,
+        array_size: tex_info.DepthOrArraySize as u32,
+        sample_count: tex_info.SampleDesc.Count,
+        mip_levels: tex_info.MipLevels as u32,
+        format: unmap_texture_format(tex_info.Format),
+        actual_handle: named_handle.0 as usize
     })
 }

@@ -20,6 +20,11 @@ DX11 games.
 The feed should then be visible on a curved screen. In case the video feed freezes, restart VRScreenCap.
 Some VR runtimes don't seem to allow for screen recentering, a future update will probably take care of this in-app.
 
+### Recentering
+You can recenter the viewer at any point in time by holding one or two hand controller near the HMD for more than 3 seconds.
+Doing it with one hand will keep the screen locked to the horizon, while using two hands will allow you to also change the screen's pitch.
+Recentering can also be triggered by selecting the proper options from the menu in the icon tray.
+
 **ATTENTION**: VRScreenCap doesn't open any window on the desktop, it only appears as a tray icon (and in your VR runtime's dashboard).
 
 
@@ -29,17 +34,26 @@ VR-Screen-Cap offers a few configuration launch parameters (all of them are opti
 ```
 vr-screen-cap.exe [OPTIONS]
   OPTIONS:
-    --x-curvature=4.0
-    --y-curvature=0.8
+    --x-curvature=0.4
+    --y-curvature=0.08
     --swap-eyes=true
     --flip-x=false
     --flip-y=false
     --distance=20.0
     --scale=10.0
+    --config-file=<file-path>
 ```
-Where every distance is in meters. Vertical and Horizontal curvatures are summed together so a 2m curvature in both directions will result in a 4m deep screen at the center.
+Where every distance is in meters. The effects of horizontal and vertical curvature are summed together, with a curvature of 1.0 the center of the screen will be bent inwards of about half its size.
 
-
+A json configuration file can be provided and it will be watched for changes, the structure of the json config is similar to the launch parameters:
+```json
+{
+    "distance" : 20.0,
+    "scale": 10.0,
+    "x_curvature": 0.4,
+    "y_curvature": 0.08
+}
+```
 ## WMR Users Disclaimer
 
 This application uses Vulkan as its backend. To the best of my knowledge WMR still doesn't support OpenXR Vulkan applications so this one won't work out of the box for you. You can try to run VR Screen Cap through projects like [OpenXR-Vk-D3D12](https://github.com/mbucchia/OpenXR-Vk-D3D12) but I can't guarantee It'll work.

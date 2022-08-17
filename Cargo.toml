@@ -1,6 +1,6 @@
 [package]
 name = "vr-screen-cap"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,7 +11,7 @@ wgpu-hal = { version = "0.13.1", features = ["vulkan"] }
 ash = "0.37.0"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
-openxr = { version = "0.16.0", features=["static"] }
+openxr = { version = "0.16.0", features=["static", "mint"] }
 bytemuck = { version = "1.11.0", features = [ "derive" ] }
 tray-item = "0.7.0"
 log4rs = "1.1.1"
@@ -19,6 +19,9 @@ log = "0.4.17"
 log-panics = { version = "2.1.0", features=["with-backtrace"] }
 clap = { version = "3.2.15", features=["derive"] }
 thread-priority = "0.8.2"
+serde = "1.0.143"
+serde_json = "1.0.83"
+notify = "4.0.17"
 dhat = { version = "0.3.0", optional = true }
 renderdoc = { version = "0.10.1", optional = true }
 
@@ -35,6 +38,7 @@ features = [
     "Win32_Security",
     "Win32_Foundation",
     "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D12",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Direct3D", 
     "Win32_Graphics_Dxgi",
