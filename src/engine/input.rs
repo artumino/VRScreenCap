@@ -101,8 +101,12 @@ impl InputContext {
             + left_location.pose.position.z.powi(2))
         .sqrt();
 
-        let right_active = self.default_right_hand.is_active(xr_session, Path::NULL).unwrap();
-        let left_active = self.default_left_hand.is_active(xr_session, Path::NULL).unwrap();
+        let right_active = self.default_right_hand.is_active(xr_session, Path::NULL).unwrap()
+            && right_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
+            && right_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
+        let left_active = self.default_left_hand.is_active(xr_session, Path::NULL).unwrap()
+            && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
+            && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
 
         let hands_near_head =
             ((right_active && right_hand_distance < 0.3) as u8) + ((left_active && left_hand_distance < 0.3) as u8);
