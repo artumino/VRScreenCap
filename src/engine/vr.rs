@@ -1,11 +1,10 @@
 use std::error::Error;
 
 use ash::vk::{self, Handle};
-use hal::{MemoryFlags, TextureUses};
+use hal::MemoryFlags;
 use openxr as xr;
 use wgpu::{
-    Device, Extent3d, TextureAspect, TextureUsages, TextureView, TextureViewDescriptor,
-    TextureViewDimension,
+    Device, Extent3d, Texture
 };
 use wgpu_hal as hal;
 
@@ -21,7 +20,8 @@ pub struct OpenXRContext {
     pub blend_mode: openxr::EnvironmentBlendMode,
 }
 
-const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
+pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
+pub const VIEW_COUNT: u32 = 2;
 
 pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     let entry = openxr::Entry::linked();
@@ -155,9 +155,9 @@ impl WgpuLoader for OpenXRContext {
         log::info!("Successfully created Vulkan instance");
 
         let vk_physical_device = vk::PhysicalDevice::from_raw(
-            self.instance
+            unsafe { self.instance
                 .vulkan_graphics_device(self.system, vk_instance.handle().as_raw() as _)
-                .unwrap() as _,
+                .unwrap() as _ },
         );
 
         let vk_device_properties =
@@ -240,11 +240,11 @@ impl WgpuLoader for OpenXRContext {
                         std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
                         vk_physical_device.as_raw() as _,
                         &vk::DeviceCreateInfo::builder()
+                        .enabled_extension_names(&device_extensions_ptrs)
                         .queue_create_infos(&[vk::DeviceQueueCreateInfo::builder()
                             .queue_family_index(queue_family_index)
                             .queue_priorities(&[1.0])
                             .build()])
-                        .enabled_extension_names(&device_extensions_ptrs)
                         .push_next(&mut vk::PhysicalDeviceMultiviewFeatures {
                             multiview: vk::TRUE,
                             ..Default::default()
@@ -318,7 +318,7 @@ impl OpenXRContext {
     ) -> (
         openxr::Swapchain<openxr::Vulkan>,
         vk::Extent2D,
-        Vec<TextureView>,
+        Vec<Texture>,
     ) {
         log::info!("Creating OpenXR swapchain");
 
@@ -327,7 +327,7 @@ impl OpenXRContext {
             .instance
             .enumerate_view_configuration_views(self.system, VIEW_TYPE)
             .unwrap();
-        assert_eq!(views.len(), 2);
+        assert_eq!(views.len(), VIEW_COUNT as usize);
         assert_eq!(views[0], views[1]);
 
         // Create the OpenXR swapchain
@@ -347,62 +347,52 @@ impl OpenXRContext {
                 width: resolution.width,
                 height: resolution.height,
                 face_count: 1,
-                array_size: 2,
+                array_size: VIEW_COUNT,
                 mip_count: 1,
             })
             .unwrap();
 
         // Create image views for the swapchain
-        let image_views: Vec<_> = xr_swapchain
+        let swapcain_textures: Vec<_> = xr_swapchain
             .enumerate_images()
             .unwrap()
             .into_iter()
             .map(|image| {
+                let wgpu_tex_desc = wgpu::TextureDescriptor {
+                    label: Some("Swapchain Target"),
+                    size: Extent3d {
+                        width: resolution.width,
+                        height: resolution.height,
+                        depth_or_array_layers: VIEW_COUNT,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: color_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                };
+                
+                let wgpu_hal_tex_desc = wgpu_hal::TextureDescriptor {
+                    label: wgpu_tex_desc.label,
+                    size: wgpu_tex_desc.size,
+                    mip_level_count: wgpu_tex_desc.mip_level_count,
+                    sample_count: wgpu_tex_desc.sample_count,
+                    dimension: wgpu_tex_desc.dimension,
+                    format: wgpu_tex_desc.format,
+                    usage: wgpu_hal::TextureUses::COLOR_TARGET | wgpu_hal::TextureUses::RESOURCE, //todo what here?
+                    memory_flags: MemoryFlags::empty(),
+                };
+                
                 // Create a WGPU image view for this image
-                let image = vulkan_image_to_texture(
+                vulkan_image_to_texture(
                     device,
                     vk::Image::from_raw(image),
-                    wgpu::TextureDescriptor {
-                        label: None,
-                        size: Extent3d {
-                            width: resolution.width,
-                            height: resolution.height,
-                            depth_or_array_layers: 2,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: color_format,
-                        usage: TextureUsages::all(), //todo what here?
-                    },
-                    wgpu_hal::TextureDescriptor {
-                        label: None,
-                        size: Extent3d {
-                            width: resolution.width,
-                            height: resolution.height,
-                            depth_or_array_layers: 2,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: color_format,
-                        usage: TextureUses::all(), //todo what here?
-                        memory_flags: MemoryFlags::empty(),
-                    },
-                );
-                image.create_view(&TextureViewDescriptor {
-                    label: None,
-                    format: Some(color_format),
-                    dimension: Some(TextureViewDimension::D2Array),
-                    aspect: TextureAspect::All,
-                    base_mip_level: 0,
-                    mip_level_count: Some(1u32.try_into().unwrap()),
-                    base_array_layer: 0,
-                    array_layer_count: Some(2.try_into().unwrap()),
-                })
+                    wgpu_tex_desc,
+                    wgpu_hal_tex_desc,
+                )
             })
             .collect();
 
-        (xr_swapchain, resolution, image_views)
+        (xr_swapchain, resolution, swapcain_textures)
     }
 }

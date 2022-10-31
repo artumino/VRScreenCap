@@ -3,7 +3,7 @@ use std::{error::Error, ffi::c_void, ptr};
 use ash::vk::{self, ImageCreateInfo};
 use wgpu::{Device, Instance, TextureFormat};
 use wgpu_hal::{api::Vulkan, MemoryFlags, TextureDescriptor, TextureUses};
-use windows::Win32::{
+use windows::{Win32::{
     Foundation::{CloseHandle, HANDLE},
     Graphics::{
         Direct3D::D3D_DRIVER_TYPE_HARDWARE,
@@ -14,7 +14,7 @@ use windows::Win32::{
         Direct3D12::{D3D12CreateDevice, ID3D12Device, ID3D12Resource},
     },
     System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS},
-};
+}, core::s, core::w};
 
 use crate::conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture};
 
@@ -33,7 +33,7 @@ impl Loader for KatangaLoaderContext {
         device: &Device,
     ) -> Result<TextureSource, Box<dyn Error>> {
         self.katanga_file_handle =
-            unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, "Local\\KatangaMappedFile")? };
+            unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, s!("Local\\KatangaMappedFile"))? };
         log::info!("Handle: {:?}", self.katanga_file_handle);
 
         self.katanga_file_mapping = unsafe {
@@ -224,11 +224,11 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<ExternalTextureInfo, Box<dyn
             D3D_DRIVER_TYPE_HARDWARE,
             None,
             D3D11_CREATE_DEVICE_FLAG(0),
-            vec![].as_slice(),
+            None,
             D3D11_SDK_VERSION,
-            &mut d3d11_device,
-            ptr::null_mut(),
-            &mut d3d11_device_context,
+            Some(&mut d3d11_device),
+            None,
+            Some(&mut d3d11_device_context),
         )?
     };
     let mut d3d11_texture: Option<ID3D11Texture2D> = None;
@@ -270,7 +270,7 @@ fn get_d3d12_texture_info() -> Result<ExternalTextureInfo, Box<dyn Error>> {
     let named_handle = unsafe {
         d3d12_device.as_ref()
             .unwrap()
-            .OpenSharedHandleByName("DX12VRStream", 0x10000000) //GENERIC_ALL
+            .OpenSharedHandleByName(w!("DX12VRStream"), 0x10000000) //GENERIC_ALL
     }?;
 
     let mut d3d12_texture: Option<ID3D12Resource> = None;

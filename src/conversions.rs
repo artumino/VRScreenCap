@@ -22,7 +22,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_R8G8B8A8_UINT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
     DXGI_FORMAT_R8G8_SINT, DXGI_FORMAT_R8G8_SNORM, DXGI_FORMAT_R8G8_UINT,
     DXGI_FORMAT_R8G8_UNORM, DXGI_FORMAT_R8_SINT, DXGI_FORMAT_R8_SNORM, DXGI_FORMAT_R8_UINT,
-    DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP, DXGI_FORMAT_R8G8B8A8_TYPELESS,
+    DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP, DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_D16_UNORM,
 };
 
 pub fn vulkan_image_to_texture(device: &Device, image: vk::Image, tex_desc: TextureDescriptor, hal_tex_desc: wgpu_hal::TextureDescriptor) -> wgpu::Texture {
@@ -89,7 +89,7 @@ pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
         DXGI_FORMAT_R32G32B32A32_FLOAT => TextureFormat::Rgba32Float,
         DXGI_FORMAT_D32_FLOAT => TextureFormat::Depth32Float,
         DXGI_FORMAT_D32_FLOAT_S8X24_UINT => TextureFormat::Depth32FloatStencil8,
-        DXGI_FORMAT_D24_UNORM_S8_UINT => TextureFormat::Depth24UnormStencil8,
+        DXGI_FORMAT_D24_UNORM_S8_UINT => TextureFormat::Depth24PlusStencil8,
         DXGI_FORMAT_R9G9B9E5_SHAREDEXP => TextureFormat::Rgb9e5Ufloat,
         DXGI_FORMAT_BC1_UNORM => TextureFormat::Bc1RgbaUnorm,
         DXGI_FORMAT_BC1_UNORM_SRGB => TextureFormat::Bc1RgbaUnormSrgb,
@@ -105,6 +105,7 @@ pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
         DXGI_FORMAT_BC6H_SF16 => TextureFormat::Bc6hRgbSfloat,
         DXGI_FORMAT_BC7_UNORM => TextureFormat::Bc7RgbaUnorm,
         DXGI_FORMAT_BC7_UNORM_SRGB => TextureFormat::Bc7RgbaUnormSrgb,
+        DXGI_FORMAT_D16_UNORM => TextureFormat::Depth16Unorm,
         _ => panic!("Unsupported texture format: {:?}", format),
     }
 }
@@ -159,7 +160,7 @@ pub fn map_texture_format(format: wgpu::TextureFormat) -> vk::Format {
         Tf::Depth32FloatStencil8 => F::D32_SFLOAT_S8_UINT,
         Tf::Depth24Plus => F::D32_SFLOAT,
         Tf::Depth24PlusStencil8 => F::D24_UNORM_S8_UINT,
-        Tf::Depth24UnormStencil8 => F::D24_UNORM_S8_UINT,
+        Tf::Depth16Unorm => F::D16_UNORM,
         Tf::Rgb9e5Ufloat => F::E5B9G9R9_UFLOAT_PACK32,
         Tf::Bc1RgbaUnorm => F::BC1_RGBA_UNORM_BLOCK,
         Tf::Bc1RgbaUnormSrgb => F::BC1_RGBA_SRGB_BLOCK,

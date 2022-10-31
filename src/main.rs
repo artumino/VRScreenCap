@@ -10,7 +10,7 @@ use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
     screen::Screen,
-    vr::{enable_xr_runtime, OpenXRContext},
+    vr::{enable_xr_runtime, OpenXRContext, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader, input::InputContext,
 };
 use loaders::StereoMode;
@@ -424,7 +424,7 @@ fn run(
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: NonZeroU32::new(2),
+                multiview: NonZeroU32::new(VIEW_COUNT),
             });
 
     // Start the OpenXR session
@@ -585,7 +585,7 @@ fn run(
                     }
 
                     // If we do not have a swapchain yet, create it
-                    let (xr_swapchain, resolution, image_views) =
+                    let (xr_swapchain, resolution, swapchain_textures) =
                         swapchain.get_or_insert_with(|| {
                             xr_context.create_swapchain(&xr_session, &wgpu_context.device)
                         });
@@ -594,7 +594,14 @@ fn run(
                     // done with this image
                     let image_index = xr_swapchain.acquire_image().unwrap();
                     xr_swapchain.wait_image(openxr::Duration::INFINITE).unwrap();
-                    let muti_view = &image_views[image_index as usize];
+                    
+                    let view_desc = wgpu::TextureViewDescriptor {
+                        base_array_layer: 0,
+                        array_layer_count: NonZeroU32::new(VIEW_COUNT),
+                        ..Default::default()
+                    };
+                    
+                    let swapchain_view = swapchain_textures[image_index as usize].create_view(&view_desc) ;
 
                     // Render!
                     let mut encoder = wgpu_context
@@ -604,10 +611,10 @@ fn run(
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: None,
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: muti_view,
+                                view: &swapchain_view,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                     store: true,
                                 },
                             })],
@@ -867,5 +874,3 @@ fn try_to_load_texture(
     }
     None
 }
-
-const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;

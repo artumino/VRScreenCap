@@ -1,7 +1,7 @@
 
-use std::{sync::mpsc::{Receiver, channel}, time::Duration, error::Error};
+use std::{sync::mpsc::{Receiver, channel}, error::Error};
 
-use notify::{Watcher, DebouncedEvent, watcher, RecursiveMode, RecommendedWatcher};
+use notify::{RecommendedWatcher, Watcher, RecursiveMode};
 use serde::{Serialize, Deserialize};
 use clap::Parser;
 
@@ -84,7 +84,7 @@ impl Default for AppConfig {
 //Notifications
 
 pub struct ConfigContext {
-    pub config_notifier: Option<Receiver<DebouncedEvent>>,
+    pub config_notifier: Option<Receiver<Result<notify::Event, notify::Error>>>,
     pub config_watcher: Option<RecommendedWatcher>,
     pub config_file: Option<String>,
     pub last_config: Option<AppConfig>,
@@ -97,8 +97,8 @@ impl ConfigContext {
             log::info!("Using config file: {}", config_file_path);
             let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(config_file_path.clone())?))?;
             let (tx, rx) = channel();
-            let mut watcher = watcher(tx, Duration::from_secs(1))?;
-            watcher.watch(config_file_path.clone(), RecursiveMode::NonRecursive)?;
+            let mut watcher = notify::RecommendedWatcher::new(tx, notify::Config::default())?;
+            watcher.watch(std::path::Path::new(&config_file_path), RecursiveMode::NonRecursive)?;
             return Ok(Some(ConfigContext {
                 config_notifier: Some(rx),
                 config_watcher: Some(watcher),
