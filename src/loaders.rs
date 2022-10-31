@@ -1,6 +1,7 @@
 use std::error::Error;
 use wgpu::{Device, Instance};
 
+#[cfg(target_os="windows")]
 pub mod katanga_loader;
 
 pub struct TextureSource {
