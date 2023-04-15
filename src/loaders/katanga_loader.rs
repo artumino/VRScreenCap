@@ -15,7 +15,7 @@ use windows::{Win32::{
     System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS, MEMORYMAPPEDVIEW_HANDLE},
 }, core::s, core::w};
 
-use crate::conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture};
+use crate::{conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture}, engine::texture::Texture2D};
 
 use super::{Loader, TextureSource};
 
@@ -137,7 +137,7 @@ impl Loader for KatangaLoaderContext {
                     sample_count: tex_info.sample_count,
                     dimension: wgpu::TextureDimension::D2,
                     format: tex_info.format,
-                    view_formats: &[tex_info.format],
+                    view_formats:  &[],
                     usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 },
                 TextureDescriptor {
@@ -151,14 +151,14 @@ impl Loader for KatangaLoaderContext {
                     sample_count: tex_info.sample_count,
                     dimension: wgpu::TextureDimension::D2,
                     format: tex_info.format,
-                    view_formats: vec!(tex_info.format),
+                    view_formats:  vec!(),
                     usage: TextureUses::EXCLUSIVE,
                     memory_flags: MemoryFlags::empty(),
                 },
             );
 
             return Ok(TextureSource {
-                texture,
+                texture: Texture2D::from_wgpu(device, texture),
                 width: tex_info.width,
                 height: tex_info.height,
                 stereo_mode: crate::loaders::StereoMode::FullSbs,

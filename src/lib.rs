@@ -11,12 +11,10 @@ use engine::{
     geometry::Vertex,
     screen::Screen,
     vr::{enable_xr_runtime, OpenXRContext, VIEW_COUNT, VIEW_TYPE},
-    WgpuContext, WgpuLoader, input::InputContext,
+    WgpuContext, WgpuLoader, input::InputContext, texture::Texture2D,
 };
 use loaders::{StereoMode, Loader, katanga_loader::KatangaLoaderContext};
-#[cfg(not(debug_assertions))]
 use log::LevelFilter;
-#[cfg(not(debug_assertions))]
 use log4rs::{
     append::file::FileAppender,
     config::{Appender, Root},
@@ -32,7 +30,7 @@ use std::{
 use thread_priority::*;
 #[cfg(not(target_os = "android"))]
 use tray_item::TrayItem;
-use wgpu::{util::DeviceExt, ShaderSource, TextureDescriptor, TextureFormat};
+use wgpu::{util::DeviceExt, ShaderSource, TextureFormat};
 
 use crate::config::ConfigContext;
 
@@ -70,9 +68,9 @@ pub fn launch() -> anyhow::Result<()> {
 
     #[cfg(feature = "renderdoc")]
     let _rd: renderdoc::RenderDoc<renderdoc::V110> =
-        renderdoc::RenderDoc::new().expect("Unable to connect");
+        renderdoc::RenderDoc::new().context("Unable to connect to renderdoc")?;
 
-    #[cfg(all(not(debug_assertions), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         let logfile = FileAppender::builder()
             .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
@@ -190,40 +188,12 @@ fn run(
     let mut current_loader = None;
 
     //Load blank texture
-    let blank_data = image::load_from_memory(include_bytes!("../assets/blank_grey.png"))?
-        .to_rgba8();
-
-    let blank_size = wgpu::Extent3d {
-        width: blank_data.dimensions().0,
-        height: blank_data.dimensions().1,
-        depth_or_array_layers: 1,
-    };
-
-    let mut screen_texture = wgpu_context.device.create_texture(&TextureDescriptor {
-        label: "Blank".into(),
-        size: blank_size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb],
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-    });
-    wgpu_context.queue.write_texture(
-        wgpu::ImageCopyTexture {
-            texture: &screen_texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &blank_data,
-        wgpu::ImageDataLayout {
-            offset: 0,
-            bytes_per_row: std::num::NonZeroU32::new(blank_size.width * 4),
-            rows_per_image: std::num::NonZeroU32::new(blank_size.height),
-        },
-        blank_size,
-    );
+    let blank_texture = Texture2D::from_bytes(
+        &wgpu_context.device,
+        &wgpu_context.queue,
+        include_bytes!("../assets/blank_grey.png"),
+        "Blank",
+    )?;
 
     let mut loaders: Vec<Box<dyn Loader>> = vec![
         #[cfg(target_os = "windows")]
@@ -232,6 +202,7 @@ fn run(
         },
     ];
 
+    let mut screen_texture = blank_texture;
     if let Some((texture, aspect, mode, loader)) = try_to_load_texture(&mut loaders, wgpu_context) {
         screen_texture = texture;
         aspect_ratio = aspect;
@@ -367,18 +338,6 @@ fn run(
                 label: Some("global_uniform_bind_group"),
             });
 
-    let diffuse_sampler = wgpu_context
-        .device
-        .create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
     let bind_group_layouts = vec![texture_bind_group_layout, global_uniform_bind_group_layout];
 
     // Not pretty at all, but it works.
@@ -386,8 +345,8 @@ fn run(
     let mut diffuse_bind_group = bind_texture(
         wgpu_context,
         texture_bind_group_layout,
-        &screen_texture.create_view(&wgpu::TextureViewDescriptor::default()),
-        &diffuse_sampler,
+        &screen_texture.view,
+        &screen_texture.sampler,
     );
 
     let pipeline_layout =
@@ -474,7 +433,6 @@ fn run(
             if let Some((texture, aspect, mode, loader)) =
                 try_to_load_texture(&mut loaders, wgpu_context)
             {
-                screen_texture.destroy();
                 screen_texture = texture;
                 aspect_ratio = aspect;
                 stereo_mode = mode;
@@ -483,8 +441,8 @@ fn run(
                 diffuse_bind_group = bind_texture(
                     wgpu_context,
                     texture_bind_group_layout,
-                    &screen_texture.create_view(&wgpu::TextureViewDescriptor::default()),
-                    &diffuse_sampler,
+                    &screen_texture.view,
+                    &screen_texture.sampler,
                 );
                 (screen_vertex_buffer, screen_index_buffer) =
                     screen.mesh.get_buffers(&wgpu_context.device);
@@ -585,13 +543,7 @@ fn run(
                     let image_index = xr_swapchain.acquire_image()?;
                     xr_swapchain.wait_image(openxr::Duration::INFINITE)?;
                     
-                    let view_desc = wgpu::TextureViewDescriptor {
-                        base_array_layer: 0,
-                        array_layer_count: NonZeroU32::new(VIEW_COUNT),
-                        ..Default::default()
-                    };
-                    
-                    let swapchain_view = swapchain_textures[image_index as usize].create_view(&view_desc) ;
+                    let swapchain_view = &swapchain_textures[image_index as usize].view;
 
                     // Render!
                     let mut encoder = wgpu_context
@@ -601,7 +553,7 @@ fn run(
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: None,
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &swapchain_view,
+                                view: swapchain_view,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -853,7 +805,7 @@ fn bind_texture(
 fn try_to_load_texture(
     loaders: &mut [Box<dyn loaders::Loader>],
     wgpu_context: &WgpuContext,
-) -> Option<(wgpu::Texture, f32, StereoMode, usize)> {
+) -> Option<(Texture2D, f32, StereoMode, usize)> {
     for (loader_idx, loader) in loaders.iter_mut().enumerate() {
         if let Ok(tex_source) = loader.load(&wgpu_context.instance, &wgpu_context.device) {
             return Some((

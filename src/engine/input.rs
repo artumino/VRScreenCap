@@ -107,28 +107,34 @@ impl InputContext {
             && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
             && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
 
+        let new_state = Self::compute_input_state(&self.input_state, right_active, right_hand_distance, left_active, left_hand_distance);
+        self.input_state = Some(new_state);
+
+        Ok(())
+    }
+
+    fn compute_input_state(input_state: &Option<InputState>, right_active: bool, right_hand_distance: f32, left_active: bool, left_hand_distance: f32) -> InputState {
+        
         let hands_near_head =
             ((right_active && right_hand_distance < 0.3) as u8) + ((left_active && left_hand_distance < 0.3) as u8);
 
-        let current_input_state = self.input_state.as_ref().context("Input state not initialized")?;
-        let near_start = if self.input_state.is_some() && current_input_state.hands_near_head > 0 {
-            current_input_state.near_start
+        if input_state.is_none() {
+            return InputState{hands_near_head, near_start: Instant::now(), count_change: Instant::now()};
+        }
+
+        let input_state = input_state.as_ref().unwrap();
+        let near_start = if input_state.hands_near_head > 0 {
+            input_state.near_start
         } else {
             Instant::now()
         };
 
-        let count_change = if self.input_state.is_none() || current_input_state.hands_near_head != hands_near_head {
+        let count_change = if input_state.hands_near_head != hands_near_head {
             Instant::now()
         } else {
-            current_input_state.count_change
+            input_state.count_change
         };
-
-        self.input_state = Some(InputState {
-            hands_near_head,
-            near_start,
-            count_change
-        });
-
-        Ok(())
+        
+        InputState{hands_near_head, near_start, count_change}
     }
 }

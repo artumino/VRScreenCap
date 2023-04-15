@@ -8,6 +8,12 @@
             "cwd": "${workspaceRoot}/target/debug",
             "preLaunchTask": "build",
             "args": ["--config-file", "E:/ArtumRepos/Rust/VRScreenCap/target/release/config.json"],
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                }
+            ]
         },
     
     ],

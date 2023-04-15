@@ -1,8 +1,12 @@
 [package]
 name = "vr-screen-cap"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 build = "build.rs"
+authors = ["Jacopo Libe <jacopo.libe@gmail.com>"]
+description = "A very simple rust program that uses the Vulkan backend of WPGU combined with OpenXR to show a virtual screen for geo11 games."
+license = "MIT"
+repository = "https://github.com/artumino/VRScreenCap"
 
 [lib]
 name = "vr_screen_cap_core"
@@ -121,3 +125,9 @@ keystore_password = "test1234"
 [package.metadata.android.signing.release]
 path = "keys/artum-dev.keystore"
 keystore_password = "test1234"
+
+
+## Build Config
+[profile.release]
+lto = true          # Enable link-time optimization
+strip = true        # Strip symbols from binary
