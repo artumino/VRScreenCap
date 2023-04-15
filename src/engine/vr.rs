@@ -42,6 +42,7 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     }
     log::info!("Enabled extensions: {:?}", enabled_extensions);
 
+    log::info!("Loading OpenXR Runtime...");
     let instance = entry.create_instance(
         &openxr::ApplicationInfo {
             application_name: "VR Screen Viewer",
