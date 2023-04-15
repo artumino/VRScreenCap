@@ -1,4 +1,3 @@
-use std::error::Error;
 use wgpu::{Device, Instance};
 
 #[cfg(target_os="windows")]
@@ -25,7 +24,7 @@ pub trait Loader {
         &mut self,
         instance: &Instance,
         device: &Device,
-    ) -> Result<TextureSource, Box<dyn Error>>;
+    ) -> anyhow::Result<TextureSource>;
 
     fn is_invalid(&self) -> bool;
 }

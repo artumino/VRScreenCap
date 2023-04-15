@@ -216,5 +216,6 @@ pub fn map_texture_format(format: wgpu::TextureFormat) -> vk::Format {
                 AstcBlock::B12x12 => F::ASTC_12X12_SFLOAT_BLOCK_EXT,
             },
         },
+        Tf::Stencil8 => F::S8_UINT,
     }
 }

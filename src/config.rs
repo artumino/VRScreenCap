@@ -1,5 +1,4 @@
-
-use std::{sync::mpsc::{Receiver, channel}, error::Error};
+use std::sync::mpsc::{Receiver, channel};
 
 use notify::{RecommendedWatcher, Watcher, RecursiveMode};
 use serde::{Serialize, Deserialize};
@@ -91,7 +90,7 @@ pub struct ConfigContext {
 }
 
 impl ConfigContext {
-    pub fn try_setup() -> Result<Option<ConfigContext>, Box<dyn Error>> {
+    pub fn try_setup() -> anyhow::Result<Option<ConfigContext>> {
         let config = AppConfig::parse();
         if let Some(config_file_path) = config.config_file {
             log::info!("Using config file: {}", config_file_path);
@@ -109,7 +108,7 @@ impl ConfigContext {
         Ok(None)
     }
 
-    pub fn update_config(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn update_config(&mut self) -> anyhow::Result<()> {
         if let Some(config_file_path) = self.config_file.clone() {
             let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(config_file_path)?))?;
             self.last_config = Some(params);

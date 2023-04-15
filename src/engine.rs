@@ -24,7 +24,7 @@ pub struct WgpuContext {
 }
 
 pub trait WgpuLoader {
-    fn load_wgpu(&mut self) -> Option<WgpuContext>;
+    fn load_wgpu(&mut self) -> anyhow::Result<WgpuContext>;
 }
 
 pub trait WgpuRunner {

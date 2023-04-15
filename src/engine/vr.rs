@@ -1,5 +1,4 @@
-use std::error::Error;
-
+use anyhow::Context;
 use ash::vk::{self, Handle};
 use hal::MemoryFlags;
 use openxr as xr;
@@ -21,16 +20,16 @@ pub struct OpenXRContext {
 pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 pub const VIEW_COUNT: u32 = 2;
 
-pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
+pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     #[cfg(not(target_os = "android"))]
     let entry = openxr::Entry::linked();
     #[cfg(target_os = "android")]
     let entry = unsafe { openxr::Entry::load()? };
 
     #[cfg(target_os = "android")]
-    entry.initialize_android_loader().unwrap();
+    entry.initialize_android_loader()?;
 
-    let available_extensions = entry.enumerate_extensions().unwrap();
+    let available_extensions = entry.enumerate_extensions()?;
     log::info!("Available extensions: {:?}", available_extensions);
     assert!(available_extensions.khr_vulkan_enable2);
 
@@ -83,8 +82,18 @@ pub fn enable_xr_runtime() -> Result<OpenXRContext, Box<dyn Error>> {
     })
 }
 
+#[cfg(not(debug_assertions))]
+fn instance_flags() -> hal::InstanceFlags {
+    hal::InstanceFlags::empty()
+}
+
+#[cfg(debug_assertions)]
+fn instance_flags() -> hal::InstanceFlags {
+    hal::InstanceFlags::empty() | hal::InstanceFlags::VALIDATION | hal::InstanceFlags::DEBUG
+}
+
 impl WgpuLoader for OpenXRContext {
-    fn load_wgpu(&mut self) -> Option<super::WgpuContext> {
+    fn load_wgpu(&mut self) -> anyhow::Result<super::WgpuContext> {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
 
@@ -96,8 +105,7 @@ impl WgpuLoader for OpenXRContext {
 
         let reqs = self
             .instance
-            .graphics_requirements::<xr::Vulkan>(self.system)
-            .unwrap();
+            .graphics_requirements::<xr::Vulkan>(self.system)?;
 
         if vk_target_version_xr < reqs.min_api_version_supported
             || vk_target_version_xr.major() > reqs.max_api_version_supported.major()
@@ -109,7 +117,7 @@ impl WgpuLoader for OpenXRContext {
             );
         }
 
-        let vk_entry = unsafe { ash::Entry::load().unwrap() };
+        let vk_entry = unsafe { ash::Entry::load()? };
         log::info!("Successfully loaded Vulkan entry");
 
         let vk_app_info = vk::ApplicationInfo::builder()
@@ -117,16 +125,10 @@ impl WgpuLoader for OpenXRContext {
             .engine_version(0)
             .api_version(vk_target_version);
 
-        let mut flags = hal::InstanceFlags::empty();
-        #[cfg(debug_assertions)]
-        {
-            flags |= hal::InstanceFlags::VALIDATION;
-            flags |= hal::InstanceFlags::DEBUG;
-        }
+        let flags = instance_flags();
 
         let instance_extensions =
-            <hal::api::Vulkan as hal::Api>::Instance::required_extensions(&vk_entry, flags)
-                .unwrap();
+            <hal::api::Vulkan as hal::Api>::Instance::required_extensions(&vk_entry, vk_target_version, flags)?;
 
         log::info!("Requested instance extensions: {:?}", instance_extensions);
         let instance_extensions_ptrs: Vec<_> =
@@ -157,8 +159,7 @@ impl WgpuLoader for OpenXRContext {
 
         let vk_physical_device = vk::PhysicalDevice::from_raw(unsafe {
             self.instance
-                .vulkan_graphics_device(self.system, vk_instance.handle().as_raw() as _)
-                .unwrap() as _
+                .vulkan_graphics_device(self.system, vk_instance.handle().as_raw() as _)? as _
         });
 
         let vk_device_properties =
@@ -200,14 +201,13 @@ impl WgpuLoader for OpenXRContext {
                 flags,
                 false,
                 Some(Box::new(())),
-            )
-            .unwrap()
+            )?
         };
-        let hal_exposed_adapter = hal_instance.expose_adapter(vk_physical_device).unwrap();
+        let hal_exposed_adapter = hal_instance.expose_adapter(vk_physical_device).context("Cannot expose WGpu-Hal adapter")?;
 
         log::info!("Created WGPU-HAL instance and adapter");
 
-        //TODO actually check if the extensions are available and avoid using then in the loaders
+        //TODO actually check if the extensions are available and avoid using them in the loaders
         let mut device_extensions = hal_exposed_adapter
             .adapter
             .required_device_extensions(wgpu_features);
@@ -216,15 +216,6 @@ impl WgpuLoader for OpenXRContext {
         device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
 
         log::info!("Requested device extensions: {:?}", device_extensions);
-
-        let uab_types = wgpu_hal::UpdateAfterBindTypes::from_limits(
-            &wgpu_limits,
-            &hal_exposed_adapter
-                .adapter
-                .physical_device_capabilities()
-                .properties()
-                .limits,
-        );
 
         let family_info = vk::DeviceQueueCreateInfo::builder()
             .queue_family_index(queue_family_index)
@@ -240,7 +231,7 @@ impl WgpuLoader for OpenXRContext {
                         .collect::<Vec<_>>();
                     let mut enabled_features = hal_exposed_adapter
                         .adapter
-                        .physical_device_features(&device_extensions, wgpu_features, uab_types);
+                        .physical_device_features(&device_extensions, wgpu_features);
 
                     let device_create_info = enabled_features
                         .add_to_device_create_builder(
@@ -282,11 +273,9 @@ impl WgpuLoader for OpenXRContext {
                     true, //    TODO: is this right?
                     &device_extensions,
                     wgpu_features,
-                    uab_types,
                     family_info.queue_family_index,
-                    0,
-                )
-                .unwrap()
+                    0
+                )?
         };
 
         log::info!("Successfully created WGPU-HAL device from vulkan device");
@@ -304,13 +293,12 @@ impl WgpuLoader for OpenXRContext {
                         ..Default::default()
                     },
                     None,
-                )
-                .unwrap()
+                )?
         };
 
         log::info!("Successfully created WGPU context");
 
-        Some(super::WgpuContext {
+        Ok(super::WgpuContext {
             instance: wgpu_instance,
             device: wgpu_device,
             physical_device: wgpu_adapter,
@@ -335,18 +323,17 @@ impl OpenXRContext {
         &self,
         xr_session: &openxr::Session<openxr::Vulkan>,
         device: &Device,
-    ) -> (
+    ) -> anyhow::Result<(
         openxr::Swapchain<openxr::Vulkan>,
         vk::Extent2D,
         Vec<Texture>,
-    ) {
+    )> {
         log::info!("Creating OpenXR swapchain");
 
         // Fetch the views we need to render to (the eye screens on the HMD)
         let views = self
             .instance
-            .enumerate_view_configuration_views(self.system, VIEW_TYPE)
-            .unwrap();
+            .enumerate_view_configuration_views(self.system, VIEW_TYPE)?;
         assert_eq!(views.len(), VIEW_COUNT as usize);
         assert_eq!(views[0], views[1]);
 
@@ -369,13 +356,11 @@ impl OpenXRContext {
                 face_count: 1,
                 array_size: VIEW_COUNT,
                 mip_count: 1,
-            })
-            .unwrap();
+            })?;
 
         // Create image views for the swapchain
         let swapcain_textures: Vec<_> = xr_swapchain
-            .enumerate_images()
-            .unwrap()
+            .enumerate_images()?
             .into_iter()
             .map(|image| {
                 let wgpu_tex_desc = wgpu::TextureDescriptor {
@@ -389,6 +374,7 @@ impl OpenXRContext {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: color_format,
+                    view_formats: &[color_format],
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                         | wgpu::TextureUsages::TEXTURE_BINDING,
                 };
@@ -400,6 +386,7 @@ impl OpenXRContext {
                     sample_count: wgpu_tex_desc.sample_count,
                     dimension: wgpu_tex_desc.dimension,
                     format: wgpu_tex_desc.format,
+                    view_formats: wgpu_tex_desc.view_formats.to_vec(),
                     usage: wgpu_hal::TextureUses::COLOR_TARGET | wgpu_hal::TextureUses::RESOURCE, //todo what here?
                     memory_flags: MemoryFlags::empty(),
                 };
@@ -414,6 +401,6 @@ impl OpenXRContext {
             })
             .collect();
 
-        (xr_swapchain, resolution, swapcain_textures)
+        Ok((xr_swapchain, resolution, swapcain_textures))
     }
 }
