@@ -10,7 +10,7 @@ use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
     screen::Screen,
-    vr::{enable_xr_runtime, OpenXRContext, VIEW_COUNT, VIEW_TYPE},
+    vr::{enable_xr_runtime, OpenXRContext, VIEW_COUNT, VIEW_TYPE, SWAPCHAIN_COLOR_FORMAT},
     WgpuContext, WgpuLoader, input::InputContext, texture::Texture2D,
 };
 use loaders::{StereoMode, Loader, katanga_loader::KatangaLoaderContext};
@@ -23,14 +23,13 @@ use log4rs::{
 };
 use openxr::ReferenceSpaceType;
 use std::{
-    borrow::Cow,
     num::NonZeroU32,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, iter,
 };
 use thread_priority::*;
 #[cfg(not(target_os = "android"))]
 use tray_item::TrayItem;
-use wgpu::{util::DeviceExt, ShaderSource, TextureFormat};
+use wgpu::util::DeviceExt;
 
 use crate::config::ConfigContext;
 
@@ -55,7 +54,7 @@ enum ToggleSetting {
 }
 
 struct TrayState {
-    pub message: Option<TrayMessages>,
+    pub message: Option<&'static TrayMessages>,
 }
 
 #[cfg(feature = "dhat-heap")]
@@ -78,7 +77,7 @@ pub fn launch() -> anyhow::Result<()> {
 
         let config = Config::builder()
             .appender(Appender::builder().build("logfile", Box::new(logfile)))
-            .build(Root::builder().appender("logfile").build(LevelFilter::Info))?;
+            .build(Root::builder().appender("logfile").build(LevelFilter::Trace))?;
 
         log4rs::init_config(config)?;
         log_panics::init();
@@ -108,19 +107,19 @@ pub fn launch() -> anyhow::Result<()> {
 }
 
 #[cfg(not(target_os = "android"))]
-fn add_tray_message_sender(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayItem, entry_name: &str, message: Option<TrayMessages>) -> anyhow::Result<()> {
+fn add_tray_message_sender(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayItem, entry_name: &'static str, message: &'static TrayMessages) -> anyhow::Result<()> {
     let cloned_state = tray_state.clone();
     Ok(tray.add_menu_item(entry_name, move || {
         if let Ok(mut locked_state) = cloned_state.lock() {
-            locked_state.message = message.clone();
+            locked_state.message = Some(message);
         }
     })?)
 }
 
 #[cfg(not(target_os = "android"))]
-fn add_all_tray_message_senders(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayItem, entries: &[(&str, Option<TrayMessages>)]) -> anyhow::Result<()> {
+fn add_all_tray_message_senders(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayItem, entries: Vec<(&'static str, &'static TrayMessages)>) -> anyhow::Result<()> {
     for (entry_name, message) in entries {
-        add_tray_message_sender(tray_state, tray, entry_name, message.clone())?;
+        add_tray_message_sender(tray_state, tray, entry_name, message)?;
     }
     Ok(())
 }
@@ -132,18 +131,18 @@ fn build_tray() -> anyhow::Result<(TrayItem, Arc<Mutex<TrayState>>)> {
     let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
 
     tray.add_label("Settings")?;
-    add_all_tray_message_senders(&tray_state, &mut tray, &[
-        ("Swap Eyes", Some(TrayMessages::ToggleSettings(ToggleSetting::SwapEyes))),
-        ("Flip X", Some(TrayMessages::ToggleSettings(ToggleSetting::FlipX))),
-        ("Flip Y", Some(TrayMessages::ToggleSettings(ToggleSetting::FlipY))),
+    add_all_tray_message_senders(&tray_state, &mut tray, vec![
+        ("Swap Eyes", &TrayMessages::ToggleSettings(ToggleSetting::SwapEyes)),
+        ("Flip X", &TrayMessages::ToggleSettings(ToggleSetting::FlipX)),
+        ("Flip Y", &TrayMessages::ToggleSettings(ToggleSetting::FlipY)),
     ])?;
 
     tray.add_label("Actions")?;
-    add_all_tray_message_senders(&tray_state, &mut tray, &[
-        ("Reload Screen", Some(TrayMessages::Reload)),
-        ("Recenter", Some(TrayMessages::Recenter(true))),
-        ("Recenter w/ Pitch", Some(TrayMessages::Recenter(false))),
-        ("Quit", Some(TrayMessages::Quit)),
+    add_all_tray_message_senders(&tray_state, &mut tray, vec![
+        ("Reload Screen", &TrayMessages::Reload),
+        ("Recenter", &TrayMessages::Recenter(true)),
+        ("Recenter w/ Pitch", &TrayMessages::Recenter(false)),
+        ("Quit", &TrayMessages::Quit),
     ])?;
 
     Ok((tray, tray_state))
@@ -175,10 +174,7 @@ fn run(
     // Load the shaders from disk
     let shader = wgpu_context
         .device
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
-        });
+        .create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
     // We don't need to configure the texture view much, so let's
     // let wgpu define it.
@@ -353,7 +349,7 @@ fn run(
         wgpu_context
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
+                label: Some("Pipeline Layout"),
                 bind_group_layouts: bind_group_layouts.iter().collect::<Vec<_>>().as_slice(),
                 push_constant_ranges: &[],
             });
@@ -362,7 +358,7 @@ fn run(
         wgpu_context
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
+                label: Some("Render Pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -372,7 +368,11 @@ fn run(
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: "fs_main",
-                    targets: &[Some(TextureFormat::Bgra8Unorm.into())],
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: SWAPCHAIN_COLOR_FORMAT,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -545,13 +545,14 @@ fn run(
                     
                     let swapchain_view = &swapchain_textures[image_index as usize].view;
 
+                    log::info!("Encode render pass");
                     // Render!
                     let mut encoder = wgpu_context
                         .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Render Encorder") });
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
+                            label: Some("Render Pass"),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                                 view: swapchain_view,
                                 resolve_target: None,
@@ -574,6 +575,7 @@ fn run(
                         rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
 
+                    log::info!("Locate views");
                     // Fetch the view transforms. To minimize latency, we intentionally do this
                     // *after* recording commands to render the scene, i.e. at the last possible
                     // moment before rendering begins in earnest on the GPU. Uniforms dependent on
@@ -598,12 +600,17 @@ fn run(
                         camera_uniform.update_view_proj(eye)?;
                     }
 
+                    log::info!("Write views");
                     wgpu_context.queue.write_buffer(
                         &camera_buffer,
                         0,
                         bytemuck::cast_slice(camera_uniform.as_slice()),
                     );
-                    wgpu_context.queue.submit(Some(encoder.finish()));
+
+                    log::info!("Submit command buffer");
+                    wgpu_context.queue.submit(iter::once(encoder.finish()));
+                    
+                    log::info!("Release swapchain image");
                     xr_swapchain.release_image()?;
 
                     // End rendering and submit the images
@@ -614,6 +621,8 @@ fn run(
                             height: resolution.height as _,
                         },
                     };
+
+                    log::info!("End frame stream");
                     frame_stream
                         .end(
                             xr_frame_state.predicted_display_time,
@@ -655,7 +664,7 @@ fn run(
                 check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated)?;
             }
             Some(TrayMessages::Recenter(horizon_locked)) => {
-                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, horizon_locked, 0, &mut xr_space)?;
+                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, *horizon_locked, 0, &mut xr_space)?;
             }
             Some(TrayMessages::ToggleSettings(setting)) => match setting {
                 ToggleSetting::SwapEyes => {

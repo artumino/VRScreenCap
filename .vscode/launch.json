@@ -12,9 +12,31 @@
                 {
                     "name": "RUST_BACKTRACE",
                     "value": "1"
+                },
+                {
+                    "name": "RUST_LOG",
+                    "value": "trace"
                 }
             ]
         },
-    
+        {
+            "name": "Release",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/release/vr-screen-cap.exe",
+            "cwd": "${workspaceRoot}/target/release",
+            "preLaunchTask": "build-release",
+            "args": ["--config-file", "E:/ArtumRepos/Rust/VRScreenCap/target/release/config.json"],
+            "environment": [
+                {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
+                },
+                {
+                    "name": "RUST_LOG",
+                    "value": "trace"
+                }
+            ]
+        },
     ],
 }

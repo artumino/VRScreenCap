@@ -15,8 +15,8 @@ crate-type = ["lib", "cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = "0.15.1"
-wgpu-hal = { version = "0.15.4", features = ["vulkan"] }
+wgpu = { git = "https://github.com/artumino/wgpu.git", branch = "feature/multiview_relaxed_validation" }
+wgpu-hal = { git = "https://github.com/artumino/wgpu.git", branch = "feature/multiview_relaxed_validation", features = ["vulkan"] }
 ash = "0.37.2"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
@@ -125,9 +125,3 @@ keystore_password = "test1234"
 [package.metadata.android.signing.release]
 path = "keys/artum-dev.keystore"
 keystore_password = "test1234"
-
-
-## Build Config
-[profile.release]
-lto = true          # Enable link-time optimization
-strip = true        # Strip symbols from binary

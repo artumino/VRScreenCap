@@ -1,5 +1,3 @@
-use std::num::NonZeroU32;
-
 use image::GenericImageView;
 use anyhow::*;
 
@@ -57,8 +55,8 @@ impl Texture2D {
             &rgba,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * dimensions.0),
-                rows_per_image: std::num::NonZeroU32::new(dimensions.1),
+                bytes_per_row: Some(4 * dimensions.0),
+                rows_per_image: Some(dimensions.1),
             },
             size,
         );
@@ -89,11 +87,11 @@ impl Texture2D {
         (
             texture.create_view(&wgpu::TextureViewDescriptor{
                 base_array_layer: 0,
-                array_layer_count: NonZeroU32::new(layers),
+                array_layer_count: Some(layers),
                 dimension: Some(dimension),
                 format: Some(texture.format()),
                 base_mip_level: 0,
-                mip_level_count: NonZeroU32::new(texture.mip_level_count()),
+                mip_level_count: Some(texture.mip_level_count()),
                 ..Default::default()
             }),
             device.create_sampler(

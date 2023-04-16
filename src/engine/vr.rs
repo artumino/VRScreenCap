@@ -19,6 +19,8 @@ pub struct OpenXRContext {
 
 pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 pub const VIEW_COUNT: u32 = 2;
+pub const SWAPCHAIN_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+pub const VK_SWAPCHAIN_COLOR_FORMAT: vk::Format = vk::Format::B8G8R8A8_SRGB;
 
 #[cfg(debug_assertions)] 
 pub fn openxr_layers() -> [&'static str; 0] {
@@ -352,8 +354,6 @@ impl OpenXRContext {
         assert_eq!(views[0], views[1]);
 
         // Create the OpenXR swapchain
-        let vk_color_format = vk::Format::B8G8R8A8_SRGB;
-        let color_format = wgpu::TextureFormat::Bgra8Unorm;
         let resolution = vk::Extent2D {
             width: views[0].recommended_image_rect_width,
             height: views[0].recommended_image_rect_height,
@@ -363,7 +363,7 @@ impl OpenXRContext {
                 create_flags: openxr::SwapchainCreateFlags::EMPTY,
                 usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
                     | openxr::SwapchainUsageFlags::SAMPLED,
-                format: vk_color_format.as_raw() as _,
+                format: VK_SWAPCHAIN_COLOR_FORMAT.as_raw() as _,
                 sample_count: 1,
                 width: resolution.width,
                 height: resolution.height,
@@ -387,9 +387,10 @@ impl OpenXRContext {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: color_format,
+                    format: SWAPCHAIN_COLOR_FORMAT,
                     view_formats:  &[],
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING
                         | wgpu::TextureUsages::COPY_DST,
                 };
 
@@ -406,6 +407,7 @@ impl OpenXRContext {
                 };
 
                 // Create a WGPU image view for this image
+                // TODO: Move this to Texture2D::from_vk_image
                 let wgpu_texture= vulkan_image_to_texture(
                     device,
                     vk::Image::from_raw(image),
