@@ -13,6 +13,19 @@
                 "reveal": "always"
             },
             "group": "build"
+        },
+        {
+            "label": "build-release",
+            "command": "cargo",
+            "type": "shell",
+            "args": ["build", "--release", "--no-default-features"],
+            "problemMatcher": [
+                "$tsc"
+            ],
+            "presentation": {
+                "reveal": "always"
+            },
+            "group": "build"
         }
     ]
 }

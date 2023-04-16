@@ -1,29 +1,8 @@
 use ash::vk;
 use wgpu::{TextureDescriptor, Device, TextureFormat};
 use wgpu_hal::api::Vulkan;
-use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-    DXGI_FORMAT_BC1_UNORM, DXGI_FORMAT_BC1_UNORM_SRGB, DXGI_FORMAT_BC2_UNORM,
-    DXGI_FORMAT_BC2_UNORM_SRGB, DXGI_FORMAT_BC3_UNORM, DXGI_FORMAT_BC3_UNORM_SRGB,
-    DXGI_FORMAT_BC4_SNORM, DXGI_FORMAT_BC4_UNORM, DXGI_FORMAT_BC5_SNORM,
-    DXGI_FORMAT_BC5_UNORM, DXGI_FORMAT_BC6H_SF16, DXGI_FORMAT_BC6H_UF16,
-    DXGI_FORMAT_BC7_UNORM, DXGI_FORMAT_BC7_UNORM_SRGB, DXGI_FORMAT_D24_UNORM_S8_UINT,
-    DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT, DXGI_FORMAT_R10G10B10A2_UNORM,
-    DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
-    DXGI_FORMAT_R16G16B16A16_SINT, DXGI_FORMAT_R16G16B16A16_SNORM,
-    DXGI_FORMAT_R16G16B16A16_UINT, DXGI_FORMAT_R16G16B16A16_UNORM,
-    DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16_SINT, DXGI_FORMAT_R16G16_SNORM,
-    DXGI_FORMAT_R16G16_UINT, DXGI_FORMAT_R16G16_UNORM, DXGI_FORMAT_R16_FLOAT,
-    DXGI_FORMAT_R16_SINT, DXGI_FORMAT_R16_SNORM, DXGI_FORMAT_R16_UINT,
-    DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32A32_SINT,
-    DXGI_FORMAT_R32G32B32A32_UINT, DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32_SINT,
-    DXGI_FORMAT_R32G32_UINT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_SINT,
-    DXGI_FORMAT_R32_UINT, DXGI_FORMAT_R8G8B8A8_SINT, DXGI_FORMAT_R8G8B8A8_SNORM,
-    DXGI_FORMAT_R8G8B8A8_UINT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
-    DXGI_FORMAT_R8G8_SINT, DXGI_FORMAT_R8G8_SNORM, DXGI_FORMAT_R8G8_UINT,
-    DXGI_FORMAT_R8G8_UNORM, DXGI_FORMAT_R8_SINT, DXGI_FORMAT_R8_SNORM, DXGI_FORMAT_R8_UINT,
-    DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R9G9B9E5_SHAREDEXP, DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_D16_UNORM,
-};
+#[cfg(target_os="windows")]
+use windows::Win32::Graphics::Dxgi::Common::*;
 
 pub fn vulkan_image_to_texture(device: &Device, image: vk::Image, tex_desc: TextureDescriptor, hal_tex_desc: wgpu_hal::TextureDescriptor) -> wgpu::Texture {
     let texture = unsafe {
@@ -43,6 +22,7 @@ pub fn vulkan_image_to_texture(device: &Device, image: vk::Image, tex_desc: Text
 }
 
 
+#[cfg(target_os="windows")]
 pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
     match format {
         DXGI_FORMAT_R8_UNORM => TextureFormat::R8Unorm,
@@ -102,7 +82,7 @@ pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
         DXGI_FORMAT_BC5_UNORM => TextureFormat::Bc5RgUnorm,
         DXGI_FORMAT_BC5_SNORM => TextureFormat::Bc5RgSnorm,
         DXGI_FORMAT_BC6H_UF16 => TextureFormat::Bc6hRgbUfloat,
-        DXGI_FORMAT_BC6H_SF16 => TextureFormat::Bc6hRgbSfloat,
+        DXGI_FORMAT_BC6H_SF16 => TextureFormat::Bc6hRgbFloat,
         DXGI_FORMAT_BC7_UNORM => TextureFormat::Bc7RgbaUnorm,
         DXGI_FORMAT_BC7_UNORM_SRGB => TextureFormat::Bc7RgbaUnormSrgb,
         DXGI_FORMAT_D16_UNORM => TextureFormat::Depth16Unorm,
@@ -173,7 +153,7 @@ pub fn map_texture_format(format: wgpu::TextureFormat) -> vk::Format {
         Tf::Bc5RgUnorm => F::BC5_UNORM_BLOCK,
         Tf::Bc5RgSnorm => F::BC5_SNORM_BLOCK,
         Tf::Bc6hRgbUfloat => F::BC6H_UFLOAT_BLOCK,
-        Tf::Bc6hRgbSfloat => F::BC6H_SFLOAT_BLOCK,
+        Tf::Bc6hRgbFloat => F::BC6H_SFLOAT_BLOCK,
         Tf::Bc7RgbaUnorm => F::BC7_UNORM_BLOCK,
         Tf::Bc7RgbaUnormSrgb => F::BC7_SRGB_BLOCK,
         Tf::Etc2Rgb8Unorm => F::ETC2_R8G8B8_UNORM_BLOCK,
@@ -236,5 +216,6 @@ pub fn map_texture_format(format: wgpu::TextureFormat) -> vk::Format {
                 AstcBlock::B12x12 => F::ASTC_12X12_SFLOAT_BLOCK_EXT,
             },
         },
+        Tf::Stencil8 => F::S8_UINT,
     }
 }

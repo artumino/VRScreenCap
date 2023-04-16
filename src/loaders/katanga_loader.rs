@@ -1,5 +1,4 @@
-use std::{error::Error, ffi::c_void, ptr};
-
+use anyhow::{bail, Context};
 use ash::vk::{self, ImageCreateInfo};
 use wgpu::{Device, Instance, TextureFormat};
 use wgpu_hal::{api::Vulkan, MemoryFlags, TextureDescriptor, TextureUses};
@@ -13,16 +12,17 @@ use windows::{Win32::{
         },
         Direct3D12::{D3D12CreateDevice, ID3D12Device, ID3D12Resource},
     },
-    System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS},
+    System::Memory::{MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_ALL_ACCESS, MEMORYMAPPEDVIEW_HANDLE},
 }, core::s, core::w};
 
-use crate::conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture};
+use crate::{conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture}, engine::texture::Texture2D};
 
 use super::{Loader, TextureSource};
 
+#[derive(Default)]
 pub struct KatangaLoaderContext {
     katanga_file_handle: HANDLE,
-    katanga_file_mapping: *mut c_void,
+    katanga_file_mapping: MEMORYMAPPEDVIEW_HANDLE,
     current_address: usize,
 }
 
@@ -31,7 +31,7 @@ impl Loader for KatangaLoaderContext {
         &mut self,
         _instance: &Instance,
         device: &Device,
-    ) -> Result<TextureSource, Box<dyn Error>> {
+    ) -> anyhow::Result<TextureSource> {
         self.katanga_file_handle =
             unsafe { OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, s!("Local\\KatangaMappedFile"))? };
         log::info!("Handle: {:?}", self.katanga_file_handle);
@@ -43,13 +43,14 @@ impl Loader for KatangaLoaderContext {
                 0,
                 0,
                 std::mem::size_of::<usize>(),
-            )
+            )?
         };
-        if self.katanga_file_mapping.is_null() {
-            return Err("Cannot map file!".into());
+
+        if self.katanga_file_mapping.is_invalid() {
+            bail!("Cannot map file!");
         }
 
-        let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
+        let address = unsafe { *(self.katanga_file_mapping.0 as *mut usize) };
         self.current_address = address;
         let tex_handle = self.current_address as vk::HANDLE;
         log::info!("{:#01x}", tex_handle as usize);
@@ -72,13 +73,13 @@ impl Loader for KatangaLoaderContext {
         log::info!("Mapped DXGI format to {:?}", tex_info.format);
         log::info!("Mapped WGPU format to Vulkan {:?}", vk_format);
 
-        let raw_image: Option<Result<vk::Image, Box<dyn Error>>> = unsafe {
+        let raw_image: Option<anyhow::Result<vk::Image>> = unsafe {
             device.as_hal::<Vulkan, _, _>(|device| {
                 device.map(|device| {
                     let raw_device = device.raw_device();
                     //let raw_phys_device = device.raw_physical_device();
                     let handle_type = match tex_info.external_api {
-                        ExternalApi::D3D11 => vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT,
+                        ExternalApi::D3D11 => vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT_KHR,
                         ExternalApi::D3D12 => vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE_KHR,
                     };
 
@@ -110,7 +111,7 @@ impl Loader for KatangaLoaderContext {
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
                         .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+                        .sharing_mode(vk::SharingMode::CONCURRENT);
 
                     let raw_image = raw_device.create_image(&image_create_info, None)?;
 
@@ -136,6 +137,7 @@ impl Loader for KatangaLoaderContext {
                     sample_count: tex_info.sample_count,
                     dimension: wgpu::TextureDimension::D2,
                     format: tex_info.format,
+                    view_formats:  &[],
                     usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 },
                 TextureDescriptor {
@@ -149,35 +151,26 @@ impl Loader for KatangaLoaderContext {
                     sample_count: tex_info.sample_count,
                     dimension: wgpu::TextureDimension::D2,
                     format: tex_info.format,
+                    view_formats:  vec!(),
                     usage: TextureUses::EXCLUSIVE,
                     memory_flags: MemoryFlags::empty(),
                 },
             );
 
             return Ok(TextureSource {
-                texture,
+                texture: Texture2D::from_wgpu(device, texture),
                 width: tex_info.width,
                 height: tex_info.height,
                 stereo_mode: crate::loaders::StereoMode::FullSbs,
             });
         }
 
-        Err("Cannot open shared texture!".into())
+        bail!("Cannot open shared texture!")
     }
 
     fn is_invalid(&self) -> bool {
-        let address = unsafe { *(self.katanga_file_mapping as *mut usize) };
+        let address = unsafe { *(self.katanga_file_mapping.0 as *mut usize) };
         self.current_address != address
-    }
-}
-
-impl Default for KatangaLoaderContext {
-    fn default() -> Self {
-        Self {
-            katanga_file_handle: Default::default(),
-            katanga_file_mapping: ptr::null_mut(),
-            current_address: 0,
-        }
     }
 }
 
@@ -185,7 +178,7 @@ impl Drop for KatangaLoaderContext {
     fn drop(&mut self) {
         log::info!("Dropping KatangaLoaderContext");
 
-        if !self.katanga_file_mapping.is_null()
+        if !self.katanga_file_mapping.is_invalid()
             && unsafe { bool::from(UnmapViewOfFile(self.katanga_file_mapping)) }
         {
             log::info!("Unmapped file!");
@@ -215,7 +208,7 @@ enum ExternalApi {
     D3D12,
 }
 
-fn get_d3d11_texture_info(handle: HANDLE) -> Result<ExternalTextureInfo, Box<dyn Error>> {
+fn get_d3d11_texture_info(handle: HANDLE) -> anyhow::Result<ExternalTextureInfo> {
     let mut d3d11_device = None;
     let mut d3d11_device_context = None;
     unsafe {
@@ -234,11 +227,12 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<ExternalTextureInfo, Box<dyn
     let mut d3d11_texture: Option<ID3D11Texture2D> = None;
     unsafe {
         d3d11_device.as_ref()
-            .unwrap()
+            .context("DX11 device not initialized")?
             .OpenSharedResource(handle, &mut d3d11_texture)
     }?;
+    let d3d11_texture = d3d11_texture.context("Failed to open shared DX11 texture")?;
     let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
-    unsafe { d3d11_texture.unwrap().GetDesc(&mut texture_desc) };
+    unsafe { d3d11_texture.GetDesc(&mut texture_desc) };
 
     log::info!(
         "Got texture from DX11 with format {:?}",
@@ -257,7 +251,7 @@ fn get_d3d11_texture_info(handle: HANDLE) -> Result<ExternalTextureInfo, Box<dyn
     })
 }
 
-fn get_d3d12_texture_info() -> Result<ExternalTextureInfo, Box<dyn Error>> {
+fn get_d3d12_texture_info() -> anyhow::Result<ExternalTextureInfo> {
     let mut d3d12_device: Option<ID3D12Device> = None;
     unsafe {
         D3D12CreateDevice(
@@ -267,20 +261,20 @@ fn get_d3d12_texture_info() -> Result<ExternalTextureInfo, Box<dyn Error>> {
         )
     }?;
 
+    let d3d12_device = d3d12_device.as_ref()
+        .context("DX12 device not initialized")?;
+
     let named_handle = unsafe {
-        d3d12_device.as_ref()
-            .unwrap()
-            .OpenSharedHandleByName(w!("DX12VRStream"), 0x10000000) //GENERIC_ALL
+            d3d12_device.OpenSharedHandleByName(w!("DX12VRStream"), 0x10000000) //GENERIC_ALL
     }?;
 
     let mut d3d12_texture: Option<ID3D12Resource> = None;
     unsafe {
-        d3d12_device.as_ref()
-            .unwrap()
-            .OpenSharedHandle(named_handle, &mut d3d12_texture)
+        d3d12_device.OpenSharedHandle(named_handle, &mut d3d12_texture)
     }?;
+    let d3d12_texture = d3d12_texture.context("Failed to open shared DX12 texture")?;
 
-    let tex_info = unsafe { d3d12_texture.unwrap().GetDesc() };
+    let tex_info = unsafe { d3d12_texture.GetDesc() };
 
     log::info!("Got texture from DX12 with format {:?}", tex_info.Format);
 
