@@ -1,5 +1,5 @@
 use anyhow::{Context, bail};
-use ash::vk::{self, Handle};
+use ash::vk::{self, Handle, QueueGlobalPriorityKHR};
 use hal::MemoryFlags;
 use openxr as xr;
 use wgpu::{Device, Extent3d};
@@ -229,10 +229,13 @@ impl WgpuLoader for OpenXRContext {
         device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
 
         log::info!("Requested device extensions: {:?}", device_extensions);
-
+        
         let family_info = vk::DeviceQueueCreateInfo::builder()
             .queue_family_index(queue_family_index)
             .queue_priorities(&[1.0])
+            .push_next(&mut vk::DeviceQueueGlobalPriorityCreateInfoKHR::builder()
+                            .global_priority(QueueGlobalPriorityKHR::REALTIME_EXT)
+            )
             .build();
 
         let device_extensions_ptrs = device_extensions

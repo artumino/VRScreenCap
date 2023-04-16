@@ -57,6 +57,11 @@ struct TrayState {
     pub message: Option<&'static TrayMessages>,
 }
 
+struct RecenterRequest {
+    pub delay: i64,
+    pub horizon_locked: bool,
+}
+
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -64,6 +69,12 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 pub fn launch() -> anyhow::Result<()> {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
+
+    #[cfg(feature = "profiling")]
+    tracy_client::Client::start();
+
+    #[cfg(feature = "profiling")]
+    profiling::register_thread!("Main Thread");
 
     #[cfg(feature = "renderdoc")]
     let _rd: renderdoc::RenderDoc<renderdoc::V110> =
@@ -408,7 +419,7 @@ fn run(
     let mut session_running = false;
     let mut swapchain = None;
     let mut screen_invalidated = false;
-    let mut last_predicted_frame_time = openxr::Time::from_nanos(0);
+    let mut recenter_request = None;
     let mut last_invalidation_check = std::time::Instant::now();
     let mut input_context = InputContext::init(&xr_context.instance)
         .map(Some)
@@ -422,6 +433,9 @@ fn run(
     }
     // Handle OpenXR events
     loop {
+        #[cfg(feature = "profiling")]
+        profiling::scope!("main loop");
+
         let time = std::time::Instant::now();
 
         if current_loader.is_some() || time.duration_since(last_invalidation_check).as_secs() > 10 {
@@ -495,39 +509,38 @@ fn run(
                     // Block until the previous frame is finished displaying, and is ready for
                     // another one. Also returns a prediction of when the next frame will be
                     // displayed, for use with predicting locations of controllers, viewpoints, etc.
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Wait for frame");
                     let xr_frame_state = frame_wait.wait()?;
-                    last_predicted_frame_time = xr_frame_state.predicted_display_time;
-
-                    //XR Input processing
-                    //if let Ok(view_acelleration) = input::get_view_acceleration_vector(&xr_reference_space, &xr_view_space, &xr_frame_state) {
-                    //    log::debug!("HMD Acceleration: {:?}", view_acelleration);
-                    //}
-                    if input_context.is_some() {
-                        let input_context = input_context.as_mut().context("Cannot borrow input context as mutable")?;
-                        input_context.process_inputs(&xr_session, &xr_frame_state, &xr_reference_space, &xr_view_space)?;
-
-                        if let Some(new_state) = &input_context.input_state {
-                            if new_state.hands_near_head > 0 && new_state.near_start.elapsed().as_secs() > 3 {
-                                let should_unlock_horizon = new_state.hands_near_head > 1 || (new_state.hands_near_head == 1 && new_state.count_change.elapsed().as_secs() < 1);
-                                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, !should_unlock_horizon, 200_000_000, &mut xr_space)?
-                            }
-                        }
-                    }
 
                     // Must be called before any rendering is done!
                     frame_stream.begin()?;
 
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("FrameStream Recording");
+
                     // Only render if we should
                     if !xr_frame_state.should_render {
+                        #[cfg(feature = "profiling")]
+                        {
+                            let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
+                            profiling::scope!("Show Time Calculation", format!("{predicted_display_time_nanos}").as_str());
+                        }
+
                         // Early bail
-                        frame_stream
+                        if let Err(err) = frame_stream
                             .end(
                                 xr_frame_state.predicted_display_time,
                                 xr_context.blend_mode,
                                 &[],
-                            )?;
+                            ) {
+                            log::error!("Failed to end frame stream when should_render is FALSE : {:?}", err);
+                        };
                         continue;
                     }
+
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Swapchain Setup");
 
                     // If we do not have a swapchain yet, create it
                     let (xr_swapchain, resolution, swapchain_textures) = match swapchain {
@@ -546,6 +559,8 @@ fn run(
                     let swapchain_view = &swapchain_textures[image_index as usize].view;
 
                     log::trace!("Encode render pass");
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Encode Render Pass");
                     // Render!
                     let mut encoder = wgpu_context
                         .device
@@ -575,6 +590,9 @@ fn run(
                         rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
 
+                    
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Locate Views");
                     log::trace!("Locate views");
                     // Fetch the view transforms. To minimize latency, we intentionally do this
                     // *after* recording commands to render the scene, i.e. at the last possible
@@ -607,9 +625,16 @@ fn run(
                         bytemuck::cast_slice(camera_uniform.as_slice()),
                     );
 
+                    
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Encode Submit");
+
                     log::trace!("Submit command buffer");
                     wgpu_context.queue.submit(iter::once(encoder.finish()));
+
                     
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Release Swapchain");
                     log::trace!("Release swapchain image");
                     xr_swapchain.release_image()?;
 
@@ -623,7 +648,13 @@ fn run(
                     };
 
                     log::trace!("End frame stream");
-                    frame_stream
+                    
+                    #[cfg(feature = "profiling")]
+                    {
+                        let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
+                        profiling::scope!("Show Time Calculation", format!("{predicted_display_time_nanos}").as_str());
+                    }
+                    if let Err(err) = frame_stream
                         .end(
                             xr_frame_state.predicted_display_time,
                             xr_context.blend_mode,
@@ -649,8 +680,43 @@ fn run(
                                                 .image_rect(rect),
                                         ),
                                 ])],
-                        )?;
+                        ) {
+                            log::error!("Failed to end frame stream: {}", err);
+                        };
+
+                    //XR Input processing
+                    if input_context.is_some() {
+                        
+                        #[cfg(feature = "profiling")]
+                        profiling::scope!("Process Inputs");
+
+                        let input_context = input_context.as_mut().context("Cannot borrow input context as mutable")?;
+                        
+                        if input_context.process_inputs(&xr_session, &xr_frame_state, &xr_reference_space, &xr_view_space).is_ok() {
+                            if let Some(new_state) = &input_context.input_state {
+                                if new_state.hands_near_head > 0 && new_state.near_start.elapsed().as_secs() > 3 {
+                                    let should_unlock_horizon = new_state.hands_near_head > 1 || (new_state.hands_near_head == 1 && new_state.count_change.elapsed().as_secs() < 1);
+
+                                    if recenter_request.is_none() {
+                                        recenter_request = Some(RecenterRequest {
+                                            horizon_locked: !should_unlock_horizon,
+                                            delay: 0,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(recenter_request) = recenter_request.take() {
+                        if let Err(err) = recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, xr_frame_state.predicted_display_time, recenter_request.horizon_locked, recenter_request.delay, &mut xr_space) {
+                            log::error!("Failed to recenter scene: {}", err);
+                        }
+                    }
                 }
+                
+                #[cfg(feature = "profiling")]
+                profiling::finish_frame!();
             }
         }
 
@@ -664,7 +730,10 @@ fn run(
                 check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated)?;
             }
             Some(TrayMessages::Recenter(horizon_locked)) => {
-                recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, last_predicted_frame_time, *horizon_locked, 0, &mut xr_space)?;
+                recenter_request = Some(RecenterRequest {
+                    horizon_locked: *horizon_locked,
+                    delay: 0,
+                });
             }
             Some(TrayMessages::ToggleSettings(setting)) => match setting {
                 ToggleSetting::SwapEyes => {

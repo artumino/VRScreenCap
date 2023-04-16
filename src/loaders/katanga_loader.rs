@@ -79,7 +79,7 @@ impl Loader for KatangaLoaderContext {
                     let raw_device = device.raw_device();
                     //let raw_phys_device = device.raw_physical_device();
                     let handle_type = match tex_info.external_api {
-                        ExternalApi::D3D11 => vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT,
+                        ExternalApi::D3D11 => vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT_KHR,
                         ExternalApi::D3D12 => vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE_KHR,
                     };
 
@@ -111,7 +111,7 @@ impl Loader for KatangaLoaderContext {
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
                         .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                        .sharing_mode(vk::SharingMode::EXCLUSIVE);
+                        .sharing_mode(vk::SharingMode::CONCURRENT);
 
                     let raw_image = raw_device.create_image(&image_create_info, None)?;
 

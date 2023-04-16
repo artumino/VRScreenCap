@@ -32,6 +32,8 @@ notify = "5.1.0"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
 dhat = { version = "0.3.2", optional = true }
 renderdoc = { version = "0.11.0", optional = true }
+profiling = { version = "1.0.8", optional = true, features = ["profile-with-tracy"] }
+tracy-client = { version = "0.15.2", optional = true }
 anyhow = "1.0.70"
 
 # PLATFORM DEPENDENT
@@ -65,6 +67,7 @@ winres = "0.1"
 default = ["renderdoc"]
 dhat-heap = ["dep:dhat"]
 renderdoc = ["dep:renderdoc"]
+profiling = ["dep:profiling","dep:tracy-client"]
 
 # ANDROID
 [package.metadata.android]
