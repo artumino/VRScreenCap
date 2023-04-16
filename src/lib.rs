@@ -77,7 +77,7 @@ pub fn launch() -> anyhow::Result<()> {
 
         let config = Config::builder()
             .appender(Appender::builder().build("logfile", Box::new(logfile)))
-            .build(Root::builder().appender("logfile").build(LevelFilter::Trace))?;
+            .build(Root::builder().appender("logfile").build(LevelFilter::Info))?;
 
         log4rs::init_config(config)?;
         log_panics::init();
@@ -545,7 +545,7 @@ fn run(
                     
                     let swapchain_view = &swapchain_textures[image_index as usize].view;
 
-                    log::info!("Encode render pass");
+                    log::trace!("Encode render pass");
                     // Render!
                     let mut encoder = wgpu_context
                         .device
@@ -575,7 +575,7 @@ fn run(
                         rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
 
-                    log::info!("Locate views");
+                    log::trace!("Locate views");
                     // Fetch the view transforms. To minimize latency, we intentionally do this
                     // *after* recording commands to render the scene, i.e. at the last possible
                     // moment before rendering begins in earnest on the GPU. Uniforms dependent on
@@ -600,17 +600,17 @@ fn run(
                         camera_uniform.update_view_proj(eye)?;
                     }
 
-                    log::info!("Write views");
+                    log::trace!("Write views");
                     wgpu_context.queue.write_buffer(
                         &camera_buffer,
                         0,
                         bytemuck::cast_slice(camera_uniform.as_slice()),
                     );
 
-                    log::info!("Submit command buffer");
+                    log::trace!("Submit command buffer");
                     wgpu_context.queue.submit(iter::once(encoder.finish()));
                     
-                    log::info!("Release swapchain image");
+                    log::trace!("Release swapchain image");
                     xr_swapchain.release_image()?;
 
                     // End rendering and submit the images
@@ -622,7 +622,7 @@ fn run(
                         },
                     };
 
-                    log::info!("End frame stream");
+                    log::trace!("End frame stream");
                     frame_stream
                         .end(
                             xr_frame_state.predicted_display_time,

@@ -2486,7 +2486,7 @@ dependencies = [
 [[package]]
 name = "wgpu"
 version = "0.15.0"
-source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#562ad0d7c2ca7973424a68cd8abf29b2a43b97e2"
+source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#026d6262394fd39e922807aa75a1d051e2d046bb"
 dependencies = [
  "arrayvec",
  "cfg-if",
@@ -2509,7 +2509,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "0.15.0"
-source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#562ad0d7c2ca7973424a68cd8abf29b2a43b97e2"
+source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#026d6262394fd39e922807aa75a1d051e2d046bb"
 dependencies = [
  "arrayvec",
  "bit-vec",
@@ -2531,7 +2531,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "0.15.1"
-source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#562ad0d7c2ca7973424a68cd8abf29b2a43b97e2"
+source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#026d6262394fd39e922807aa75a1d051e2d046bb"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -2572,7 +2572,7 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "0.15.0"
-source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#562ad0d7c2ca7973424a68cd8abf29b2a43b97e2"
+source = "git+https://github.com/artumino/wgpu.git?branch=feature/multiview_relaxed_validation#026d6262394fd39e922807aa75a1d051e2d046bb"
 dependencies = [
  "bitflags 2.1.0",
  "js-sys",
