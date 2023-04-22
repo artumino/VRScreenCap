@@ -58,3 +58,26 @@ fn fs_main(in: VertexOutput, @builtin(view_index) view_index: i32) -> @location(
     let x_offset = abs(f32(view_index) - screen_params.eye_offset) / 2.0;
     return textureSample(t_diffuse, s_diffuse, vec2<f32>(abs(in.tex_coords.x - screen_params.x_offset) / 2.0 + x_offset, abs(in.tex_coords.y - screen_params.y_offset)));
 }
+
+@vertex
+fn blur_vs_main(
+    model: VertexInput,
+    @builtin(view_index) view_index: i32
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.tex_coords = model.tex_coords;
+    out.clip_position = camera[view_index].view_proj * model_uniform.model_matrix * vec4<f32>(model.position.xyz, 1.0);
+    return out;
+}
+
+@fragment
+fn blur_fs_main(in: VertexOutput, @builtin(view_index) view_index: i32) -> @location(0) vec4<f32> {
+    let x_offset = abs(f32(view_index) - screen_params.eye_offset) / 2.0;
+    let uv = vec2<f32>(abs(in.tex_coords.x - screen_params.x_offset) / 2.0 + x_offset, abs(in.tex_coords.y - screen_params.y_offset));
+    let clamped_text_coords = clamp(in.tex_coords, vec2<f32>(0.0), vec2<f32>(1.0)) - vec2<f32>(0.5);
+    let dist = length(clamped_text_coords);
+    let radius = 0.5;
+    let softness = 0.085;
+    let vig = smoothstep(radius, radius - softness, dist);
+    return textureSample(t_diffuse, s_diffuse, uv) * vig;
+}

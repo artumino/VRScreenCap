@@ -4,15 +4,32 @@ use super::{entity::Entity, geometry::Mesh};
 
 pub struct Screen {
     pub mesh: Mesh,
+    pub ambient_mesh: Option<Mesh>,
     pub entity: Entity,
     pub aspect_ratio: f32,
     pub scale: f32,
 }
 
 impl Screen {
-    pub fn new(distance: f32, scale: f32, aspect_ratio: f32) -> Screen {
+    pub fn new(
+        device: &wgpu::Device,
+        distance: f32,
+        scale: f32,
+        aspect_ratio: f32,
+        ambient_enabled: bool,
+    ) -> Screen {
         Screen {
-            mesh: Mesh::get_plane_rectangle(100, 100, 1.0, 1.0, 0.0),
+            mesh: Mesh::get_plane_rectangle(device, 100, 100, 1.0, 1.0, 0.0),
+            ambient_mesh: if ambient_enabled {
+                Some(Mesh::from_asset(
+                    device,
+                    include_bytes!("../../assets/ambient_dome.obj"),
+                    100.0,
+                    50.0,
+                ))
+            } else {
+                None
+            },
             entity: Entity::new(
                 0,
                 cgmath::Vector3 {

@@ -8,7 +8,7 @@ use clap::Parser;
 use config::AppConfig;
 use engine::{
     camera::{Camera, CameraUniform},
-    geometry::Vertex,
+    geometry::{ModelVertex, Vertex},
     input::InputContext,
     screen::Screen,
     texture::Texture2D,
@@ -250,9 +250,13 @@ fn run(
         }) => config.clone(),
         _ => AppConfig::parse(),
     };
-    let mut screen = Screen::new(-screen_params.distance, screen_params.scale, aspect_ratio);
-    let (mut screen_vertex_buffer, mut screen_index_buffer) =
-        screen.mesh.get_buffers(&wgpu_context.device);
+    let mut screen = Screen::new(
+        &wgpu_context.device,
+        -screen_params.distance,
+        screen_params.scale,
+        aspect_ratio,
+        true,
+    );
 
     let screen_params_buffer =
         wgpu_context
@@ -402,11 +406,37 @@ fn run(
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: "vs_main",
-                    buffers: &[Vertex::desc()],
+                    buffers: &[ModelVertex::desc()],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: SWAPCHAIN_COLOR_FORMAT,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: NonZeroU32::new(VIEW_COUNT),
+            });
+
+    let blur_pipeline =
+        wgpu_context
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Blur Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "blur_vs_main",
+                    buffers: &[ModelVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "blur_fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
                         format: SWAPCHAIN_COLOR_FORMAT,
                         blend: Some(wgpu::BlendState::REPLACE),
@@ -486,8 +516,6 @@ fn run(
                     &screen_texture.view,
                     &screen_texture.sampler,
                 );
-                (screen_vertex_buffer, screen_index_buffer) =
-                    screen.mesh.get_buffers(&wgpu_context.device);
 
                 wgpu_context.queue.write_buffer(
                     &screen_model_matrix_buffer,
@@ -614,14 +642,29 @@ fn run(
                             })],
                             depth_stencil_attachment: None,
                         });
-                        rpass.set_pipeline(&render_pipeline);
 
+                        // Render the ambient dome
+                        if let (Some(ref ambient_mesh),) = (&screen.ambient_mesh,) {
+                            rpass.set_pipeline(&blur_pipeline);
+
+                            rpass.set_bind_group(0, &diffuse_bind_group, &[]);
+                            rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
+                            rpass.set_vertex_buffer(0, ambient_mesh.vertex_buffer().slice(..));
+                            rpass.set_index_buffer(
+                                ambient_mesh.index_buffer().slice(..),
+                                wgpu::IndexFormat::Uint32,
+                            );
+                            rpass.draw_indexed(0..ambient_mesh.indices(), 0, 0..1);
+                        }
+
+                        // Render the screen
+                        rpass.set_pipeline(&render_pipeline);
                         rpass.set_bind_group(0, &diffuse_bind_group, &[]);
                         rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
-                        rpass.set_vertex_buffer(0, screen_vertex_buffer.slice(..));
+                        rpass.set_vertex_buffer(0, screen.mesh.vertex_buffer().slice(..));
                         rpass.set_index_buffer(
-                            screen_index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint16,
+                            screen.mesh.index_buffer().slice(..),
+                            wgpu::IndexFormat::Uint32,
                         );
                         rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
