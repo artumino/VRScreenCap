@@ -1,8 +1,8 @@
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{channel, Receiver};
 
-use notify::{RecommendedWatcher, Watcher, RecursiveMode};
-use serde::{Serialize, Deserialize};
 use clap::Parser;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use serde::{Deserialize, Serialize};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -14,8 +14,7 @@ pub struct ScreenParamsUniform {
     x_offset: f32,
 }
 
-#[derive(Parser)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Parser, Serialize, Deserialize, Debug, Clone)]
 #[serde(default)]
 pub struct AppConfig {
     // Maximum depth at the center in meters, default: 0.4, usage: --x-curvature=0.4
@@ -49,17 +48,17 @@ impl AppConfig {
         ScreenParamsUniform {
             x_curvature: self.x_curvature,
             y_curvature: self.y_curvature,
-            eye_offset: match self.swap_eyes { 
+            eye_offset: match self.swap_eyes {
                 true => 1.0,
-                _ => 0.0
+                _ => 0.0,
             },
-            y_offset: match self.flip_y { 
+            y_offset: match self.flip_y {
                 true => 1.0,
-                _ => 0.0
+                _ => 0.0,
             },
-            x_offset: match self.flip_x { 
+            x_offset: match self.flip_x {
                 true => 1.0,
-                _ => 0.0
+                _ => 0.0,
             },
         }
     }
@@ -94,10 +93,15 @@ impl ConfigContext {
         let config = AppConfig::parse();
         if let Some(config_file_path) = config.config_file {
             log::info!("Using config file: {}", config_file_path);
-            let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(config_file_path.clone())?))?;
+            let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(
+                config_file_path.clone(),
+            )?))?;
             let (tx, rx) = channel();
             let mut watcher = notify::RecommendedWatcher::new(tx, notify::Config::default())?;
-            watcher.watch(std::path::Path::new(&config_file_path), RecursiveMode::NonRecursive)?;
+            watcher.watch(
+                std::path::Path::new(&config_file_path),
+                RecursiveMode::NonRecursive,
+            )?;
             return Ok(Some(ConfigContext {
                 config_notifier: Some(rx),
                 config_watcher: Some(watcher),
@@ -110,7 +114,9 @@ impl ConfigContext {
 
     pub fn update_config(&mut self) -> anyhow::Result<()> {
         if let Some(config_file_path) = self.config_file.clone() {
-            let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(config_file_path)?))?;
+            let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(
+                config_file_path,
+            )?))?;
             self.last_config = Some(params);
         }
         Ok(())

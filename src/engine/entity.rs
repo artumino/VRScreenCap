@@ -8,7 +8,7 @@ pub struct Entity {
     pub scale: Vector3<f32>,
     pub world_matrix: Matrix4<f32>,
     pub local_matrix: Matrix4<f32>,
-    uniform_matrix: ModelUniform
+    uniform_matrix: ModelUniform,
 }
 
 impl Default for Entity {
@@ -38,7 +38,7 @@ impl Entity {
             scale,
             world_matrix: Matrix4::identity(),
             local_matrix: Matrix4::identity(),
-            uniform_matrix: ModelUniform::new()
+            uniform_matrix: ModelUniform::new(),
         };
 
         entity.update_matrices(&[]);

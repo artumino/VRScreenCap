@@ -1,19 +1,21 @@
-use anyhow::Context;
 #[cfg(target_os = "windows")]
 use ::windows::Win32::System::Threading::{
     GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS,
 };
+use anyhow::Context;
 use cgmath::Rotation3;
 use clap::Parser;
 use config::AppConfig;
 use engine::{
     camera::{Camera, CameraUniform},
     geometry::Vertex,
+    input::InputContext,
     screen::Screen,
-    vr::{enable_xr_runtime, OpenXRContext, VIEW_COUNT, VIEW_TYPE, SWAPCHAIN_COLOR_FORMAT},
-    WgpuContext, WgpuLoader, input::InputContext, texture::Texture2D,
+    texture::Texture2D,
+    vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
+    WgpuContext, WgpuLoader,
 };
-use loaders::{StereoMode, Loader, katanga_loader::KatangaLoaderContext};
+use loaders::{katanga_loader::KatangaLoaderContext, Loader, StereoMode};
 use log::LevelFilter;
 use log4rs::{
     append::file::FileAppender,
@@ -23,8 +25,9 @@ use log4rs::{
 };
 use openxr::ReferenceSpaceType;
 use std::{
+    iter,
     num::NonZeroU32,
-    sync::{Arc, Mutex}, iter,
+    sync::{Arc, Mutex},
 };
 use thread_priority::*;
 #[cfg(not(target_os = "android"))]
@@ -98,12 +101,12 @@ pub fn launch() -> anyhow::Result<()> {
 
     let mut xr_context = enable_xr_runtime()?;
     let wgpu_context = xr_context.load_wgpu()?;
-    
-    #[cfg(not(target_os="android"))]
+
+    #[cfg(not(target_os = "android"))]
     let (_tray, tray_state) = build_tray()?;
-    #[cfg(target_os="android")]
+    #[cfg(target_os = "android")]
     let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
-    
+
     let mut config_context = config::ConfigContext::try_setup().unwrap_or(None);
 
     log::info!("Finished initial setup, running main loop");
@@ -118,7 +121,12 @@ pub fn launch() -> anyhow::Result<()> {
 }
 
 #[cfg(not(target_os = "android"))]
-fn add_tray_message_sender(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayItem, entry_name: &'static str, message: &'static TrayMessages) -> anyhow::Result<()> {
+fn add_tray_message_sender(
+    tray_state: &Arc<Mutex<TrayState>>,
+    tray: &mut TrayItem,
+    entry_name: &'static str,
+    message: &'static TrayMessages,
+) -> anyhow::Result<()> {
     let cloned_state = tray_state.clone();
     Ok(tray.add_menu_item(entry_name, move || {
         if let Ok(mut locked_state) = cloned_state.lock() {
@@ -128,7 +136,11 @@ fn add_tray_message_sender(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayIt
 }
 
 #[cfg(not(target_os = "android"))]
-fn add_all_tray_message_senders(tray_state: &Arc<Mutex<TrayState>>, tray: &mut TrayItem, entries: Vec<(&'static str, &'static TrayMessages)>) -> anyhow::Result<()> {
+fn add_all_tray_message_senders(
+    tray_state: &Arc<Mutex<TrayState>>,
+    tray: &mut TrayItem,
+    entries: Vec<(&'static str, &'static TrayMessages)>,
+) -> anyhow::Result<()> {
     for (entry_name, message) in entries {
         add_tray_message_sender(tray_state, tray, entry_name, message)?;
     }
@@ -142,29 +154,43 @@ fn build_tray() -> anyhow::Result<(TrayItem, Arc<Mutex<TrayState>>)> {
     let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
 
     tray.add_label("Settings")?;
-    add_all_tray_message_senders(&tray_state, &mut tray, vec![
-        ("Swap Eyes", &TrayMessages::ToggleSettings(ToggleSetting::SwapEyes)),
-        ("Flip X", &TrayMessages::ToggleSettings(ToggleSetting::FlipX)),
-        ("Flip Y", &TrayMessages::ToggleSettings(ToggleSetting::FlipY)),
-    ])?;
+    add_all_tray_message_senders(
+        &tray_state,
+        &mut tray,
+        vec![
+            (
+                "Swap Eyes",
+                &TrayMessages::ToggleSettings(ToggleSetting::SwapEyes),
+            ),
+            (
+                "Flip X",
+                &TrayMessages::ToggleSettings(ToggleSetting::FlipX),
+            ),
+            (
+                "Flip Y",
+                &TrayMessages::ToggleSettings(ToggleSetting::FlipY),
+            ),
+        ],
+    )?;
 
     tray.add_label("Actions")?;
-    add_all_tray_message_senders(&tray_state, &mut tray, vec![
-        ("Reload Screen", &TrayMessages::Reload),
-        ("Recenter", &TrayMessages::Recenter(true)),
-        ("Recenter w/ Pitch", &TrayMessages::Recenter(false)),
-        ("Quit", &TrayMessages::Quit),
-    ])?;
+    add_all_tray_message_senders(
+        &tray_state,
+        &mut tray,
+        vec![
+            ("Reload Screen", &TrayMessages::Reload),
+            ("Recenter", &TrayMessages::Recenter(true)),
+            ("Recenter w/ Pitch", &TrayMessages::Recenter(false)),
+            ("Quit", &TrayMessages::Quit),
+        ],
+    )?;
 
     Ok((tray, tray_state))
 }
 
-
 fn try_elevate_priority() {
     log::info!("Trying to elevate process priority");
-    if set_current_thread_priority(ThreadPriority::Max)
-        .is_err()
-    {
+    if set_current_thread_priority(ThreadPriority::Max).is_err() {
         log::warn!("Failed to set thread priority to max!");
     }
 
@@ -348,7 +374,9 @@ fn run(
     let bind_group_layouts = vec![texture_bind_group_layout, global_uniform_bind_group_layout];
 
     // Not pretty at all, but it works.
-    let texture_bind_group_layout = bind_group_layouts.get(0).context("Failed to get texture bind group layout")?;
+    let texture_bind_group_layout = bind_group_layouts
+        .get(0)
+        .context("Failed to get texture bind group layout")?;
     let mut diffuse_bind_group = bind_texture(
         wgpu_context,
         texture_bind_group_layout,
@@ -393,18 +421,16 @@ fn run(
 
     // Start the OpenXR session
     let (xr_session, mut frame_wait, mut frame_stream) = unsafe {
-        xr_context
-            .instance
-            .create_session::<openxr::Vulkan>(
-                xr_context.system,
-                &openxr::vulkan::SessionCreateInfo {
-                    instance: wgpu_context.vk_instance_ptr as _,
-                    physical_device: wgpu_context.vk_phys_device_ptr as _,
-                    device: wgpu_context.vk_device_ptr as _,
-                    queue_family_index: wgpu_context.queue_index,
-                    queue_index: 0,
-                },
-            )?
+        xr_context.instance.create_session::<openxr::Vulkan>(
+            xr_context.system,
+            &openxr::vulkan::SessionCreateInfo {
+                instance: wgpu_context.vk_instance_ptr as _,
+                physical_device: wgpu_context.vk_phys_device_ptr as _,
+                device: wgpu_context.vk_device_ptr as _,
+                queue_family_index: wgpu_context.queue_index,
+                queue_index: 0,
+            },
+        )?
     };
 
     // Create a room-scale reference space
@@ -426,7 +452,9 @@ fn run(
         .unwrap_or(None);
 
     if input_context.is_some() {
-        let mut attach_context = input_context.take().context("Cannot attach input context to session")?;
+        let mut attach_context = input_context
+            .take()
+            .context("Cannot attach input context to session")?;
         if attach_context.attach_to_session(&xr_session).is_ok() {
             input_context = Some(attach_context);
         }
@@ -497,11 +525,10 @@ fn run(
             }
             Some(openxr::Event::ReferenceSpaceChangePending(_)) => {
                 //Reset XR space to follow runtime
-                xr_space = xr_session
-                    .create_reference_space(
-                        openxr::ReferenceSpaceType::LOCAL,
-                        openxr::Posef::IDENTITY,
-                    )?;
+                xr_space = xr_session.create_reference_space(
+                    openxr::ReferenceSpaceType::LOCAL,
+                    openxr::Posef::IDENTITY,
+                )?;
             }
             _ => {
                 // Render to HMD only if we have an active session
@@ -523,18 +550,24 @@ fn run(
                     if !xr_frame_state.should_render {
                         #[cfg(feature = "profiling")]
                         {
-                            let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
-                            profiling::scope!("Show Time Calculation", format!("{predicted_display_time_nanos}").as_str());
+                            let predicted_display_time_nanos =
+                                xr_frame_state.predicted_display_time.as_nanos();
+                            profiling::scope!(
+                                "Show Time Calculation",
+                                format!("{predicted_display_time_nanos}").as_str()
+                            );
                         }
 
                         // Early bail
-                        if let Err(err) = frame_stream
-                            .end(
-                                xr_frame_state.predicted_display_time,
-                                xr_context.blend_mode,
-                                &[],
-                            ) {
-                            log::error!("Failed to end frame stream when should_render is FALSE : {:?}", err);
+                        if let Err(err) = frame_stream.end(
+                            xr_frame_state.predicted_display_time,
+                            xr_context.blend_mode,
+                            &[],
+                        ) {
+                            log::error!(
+                                "Failed to end frame stream when should_render is FALSE : {:?}",
+                                err
+                            );
                         };
                         continue;
                     }
@@ -546,7 +579,8 @@ fn run(
                     let (xr_swapchain, resolution, swapchain_textures) = match swapchain {
                         Some(ref mut swapchain) => swapchain,
                         None => {
-                            let new_swapchain = xr_context.create_swapchain(&xr_session, &wgpu_context.device)?;
+                            let new_swapchain =
+                                xr_context.create_swapchain(&xr_session, &wgpu_context.device)?;
                             swapchain.get_or_insert(new_swapchain)
                         }
                     };
@@ -555,16 +589,18 @@ fn run(
                     // done with this image
                     let image_index = xr_swapchain.acquire_image()?;
                     xr_swapchain.wait_image(openxr::Duration::INFINITE)?;
-                    
+
                     let swapchain_view = &swapchain_textures[image_index as usize].view;
 
                     log::trace!("Encode render pass");
                     #[cfg(feature = "profiling")]
                     profiling::scope!("Encode Render Pass");
                     // Render!
-                    let mut encoder = wgpu_context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Render Encorder") });
+                    let mut encoder = wgpu_context.device.create_command_encoder(
+                        &wgpu::CommandEncoderDescriptor {
+                            label: Some("Render Encorder"),
+                        },
+                    );
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("Render Pass"),
@@ -590,7 +626,6 @@ fn run(
                         rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
 
-                    
                     #[cfg(feature = "profiling")]
                     profiling::scope!("Locate Views");
                     log::trace!("Locate views");
@@ -600,11 +635,16 @@ fn run(
                     // this data can be sent to the GPU just-in-time by writing them to per-frame
                     // host-visible memory which the GPU will only read once the command buffer is
                     // submitted.
-                    let (_, views) = xr_session
-                        .locate_views(VIEW_TYPE, xr_frame_state.predicted_display_time, &xr_space)?;
+                    let (_, views) = xr_session.locate_views(
+                        VIEW_TYPE,
+                        xr_frame_state.predicted_display_time,
+                        &xr_space,
+                    )?;
 
                     for (view_idx, view) in views.iter().enumerate() {
-                        let mut eye = cameras.get_mut(view_idx).context("Cannot borrow camera as mutable")?;
+                        let mut eye = cameras
+                            .get_mut(view_idx)
+                            .context("Cannot borrow camera as mutable")?;
                         eye.entity.position.x = view.pose.position.x;
                         eye.entity.position.y = view.pose.position.y;
                         eye.entity.position.z = view.pose.position.z;
@@ -614,7 +654,9 @@ fn run(
                         eye.entity.rotation.s = view.pose.orientation.w;
                         eye.entity.update_matrices(&[]);
                         eye.update_projection_from_tangents(view.fov);
-                        let camera_uniform = camera_uniform.get_mut(view_idx).context("Cannot borrow camera uniform buffer as mutable")?;
+                        let camera_uniform = camera_uniform
+                            .get_mut(view_idx)
+                            .context("Cannot borrow camera uniform buffer as mutable")?;
                         camera_uniform.update_view_proj(eye)?;
                     }
 
@@ -625,14 +667,12 @@ fn run(
                         bytemuck::cast_slice(camera_uniform.as_slice()),
                     );
 
-                    
                     #[cfg(feature = "profiling")]
                     profiling::scope!("Encode Submit");
 
                     log::trace!("Submit command buffer");
                     wgpu_context.queue.submit(iter::once(encoder.finish()));
 
-                    
                     #[cfg(feature = "profiling")]
                     profiling::scope!("Release Swapchain");
                     log::trace!("Release swapchain image");
@@ -648,54 +688,70 @@ fn run(
                     };
 
                     log::trace!("End frame stream");
-                    
+
                     #[cfg(feature = "profiling")]
                     {
-                        let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
-                        profiling::scope!("Show Time Calculation", format!("{predicted_display_time_nanos}").as_str());
+                        let predicted_display_time_nanos =
+                            xr_frame_state.predicted_display_time.as_nanos();
+                        profiling::scope!(
+                            "Show Time Calculation",
+                            format!("{predicted_display_time_nanos}").as_str()
+                        );
                     }
-                    if let Err(err) = frame_stream
-                        .end(
-                            xr_frame_state.predicted_display_time,
-                            xr_context.blend_mode,
-                            &[&openxr::CompositionLayerProjection::new()
-                                .space(&xr_space)
-                                .views(&[
-                                    openxr::CompositionLayerProjectionView::new()
-                                        .pose(views[0].pose)
-                                        .fov(views[0].fov)
-                                        .sub_image(
-                                            openxr::SwapchainSubImage::new()
-                                                .swapchain(xr_swapchain)
-                                                .image_array_index(0)
-                                                .image_rect(rect),
-                                        ),
-                                    openxr::CompositionLayerProjectionView::new()
-                                        .pose(views[1].pose)
-                                        .fov(views[1].fov)
-                                        .sub_image(
-                                            openxr::SwapchainSubImage::new()
-                                                .swapchain(xr_swapchain)
-                                                .image_array_index(1)
-                                                .image_rect(rect),
-                                        ),
-                                ])],
-                        ) {
-                            log::error!("Failed to end frame stream: {}", err);
-                        };
+                    if let Err(err) = frame_stream.end(
+                        xr_frame_state.predicted_display_time,
+                        xr_context.blend_mode,
+                        &[&openxr::CompositionLayerProjection::new()
+                            .space(&xr_space)
+                            .views(&[
+                                openxr::CompositionLayerProjectionView::new()
+                                    .pose(views[0].pose)
+                                    .fov(views[0].fov)
+                                    .sub_image(
+                                        openxr::SwapchainSubImage::new()
+                                            .swapchain(xr_swapchain)
+                                            .image_array_index(0)
+                                            .image_rect(rect),
+                                    ),
+                                openxr::CompositionLayerProjectionView::new()
+                                    .pose(views[1].pose)
+                                    .fov(views[1].fov)
+                                    .sub_image(
+                                        openxr::SwapchainSubImage::new()
+                                            .swapchain(xr_swapchain)
+                                            .image_array_index(1)
+                                            .image_rect(rect),
+                                    ),
+                            ])],
+                    ) {
+                        log::error!("Failed to end frame stream: {}", err);
+                    };
 
                     //XR Input processing
                     if input_context.is_some() {
-                        
                         #[cfg(feature = "profiling")]
                         profiling::scope!("Process Inputs");
 
-                        let input_context = input_context.as_mut().context("Cannot borrow input context as mutable")?;
-                        
-                        if input_context.process_inputs(&xr_session, &xr_frame_state, &xr_reference_space, &xr_view_space).is_ok() {
+                        let input_context = input_context
+                            .as_mut()
+                            .context("Cannot borrow input context as mutable")?;
+
+                        if input_context
+                            .process_inputs(
+                                &xr_session,
+                                &xr_frame_state,
+                                &xr_reference_space,
+                                &xr_view_space,
+                            )
+                            .is_ok()
+                        {
                             if let Some(new_state) = &input_context.input_state {
-                                if new_state.hands_near_head > 0 && new_state.near_start.elapsed().as_secs() > 3 {
-                                    let should_unlock_horizon = new_state.hands_near_head > 1 || (new_state.hands_near_head == 1 && new_state.count_change.elapsed().as_secs() < 1);
+                                if new_state.hands_near_head > 0
+                                    && new_state.near_start.elapsed().as_secs() > 3
+                                {
+                                    let should_unlock_horizon = new_state.hands_near_head > 1
+                                        || (new_state.hands_near_head == 1
+                                            && new_state.count_change.elapsed().as_secs() < 1);
 
                                     if recenter_request.is_none() {
                                         recenter_request = Some(RecenterRequest {
@@ -709,19 +765,33 @@ fn run(
                     }
 
                     if let Some(recenter_request) = recenter_request.take() {
-                        if let Err(err) = recenter_scene(&xr_session, &xr_reference_space, &xr_view_space, xr_frame_state.predicted_display_time, recenter_request.horizon_locked, recenter_request.delay, &mut xr_space) {
+                        if let Err(err) = recenter_scene(
+                            &xr_session,
+                            &xr_reference_space,
+                            &xr_view_space,
+                            xr_frame_state.predicted_display_time,
+                            recenter_request.horizon_locked,
+                            recenter_request.delay,
+                            &mut xr_space,
+                        ) {
                             log::error!("Failed to recenter scene: {}", err);
                         }
                     }
                 }
-                
+
                 #[cfg(feature = "profiling")]
                 profiling::finish_frame!();
             }
         }
 
         // Non-XR Input processing
-        match tray_state.lock().ok().context("Cannot get lock on icon tray state")?.message.take() {
+        match tray_state
+            .lock()
+            .ok()
+            .context("Cannot get lock on icon tray state")?
+            .message
+            .take()
+        {
             Some(TrayMessages::Quit) => {
                 log::info!("Qutting app manually...");
                 break;
@@ -782,7 +852,9 @@ fn run(
         }) = config
         {
             if config_receiver.try_recv().is_ok() {
-                let config = config.as_mut().context("Cannot borrow configuration as mutable")?;
+                let config = config
+                    .as_mut()
+                    .context("Cannot borrow configuration as mutable")?;
                 let config_changed = config.update_config().is_ok();
 
                 if config_changed {
@@ -806,17 +878,27 @@ fn run(
             }
         }
     }
-    
+
     Ok(())
 }
 
-fn recenter_scene(xr_session: &openxr::Session<openxr::Vulkan>, xr_reference_space: &openxr::Space, xr_view_space: &openxr::Space, last_predicted_frame_time: openxr::Time, horizon_locked: bool, delay: i64, xr_space: &mut openxr::Space) -> anyhow::Result<()> {
+fn recenter_scene(
+    xr_session: &openxr::Session<openxr::Vulkan>,
+    xr_reference_space: &openxr::Space,
+    xr_view_space: &openxr::Space,
+    last_predicted_frame_time: openxr::Time,
+    horizon_locked: bool,
+    delay: i64,
+    xr_space: &mut openxr::Space,
+) -> anyhow::Result<()> {
     let mut view_location_pose = xr_view_space
-        .locate(xr_reference_space, openxr::Time::from_nanos(last_predicted_frame_time.as_nanos() - delay))?
+        .locate(
+            xr_reference_space,
+            openxr::Time::from_nanos(last_predicted_frame_time.as_nanos() - delay),
+        )?
         .pose;
-    let quaternion = cgmath::Quaternion::from(mint::Quaternion::from(
-        view_location_pose.orientation,
-    ));
+    let quaternion =
+        cgmath::Quaternion::from(mint::Quaternion::from(view_location_pose.orientation));
     let forward = cgmath::Vector3::new(0.0, 0.0, 1.0);
     let look_dir = quaternion * forward;
     let yaw = cgmath::Rad(look_dir.x.atan2(look_dir.z));
@@ -833,8 +915,7 @@ fn recenter_scene(xr_session: &openxr::Session<openxr::Vulkan>, xr_reference_spa
         z: clean_orientation.v.z,
         w: clean_orientation.s,
     };
-    *xr_space = xr_session
-        .create_reference_space(ReferenceSpaceType::LOCAL, view_location_pose)?;
+    *xr_space = xr_session.create_reference_space(ReferenceSpaceType::LOCAL, view_location_pose)?;
 
     Ok(())
 }
@@ -845,7 +926,11 @@ fn check_loader_invalidation(
     screen_invalidated: &mut bool,
 ) -> anyhow::Result<()> {
     if let Some(loader) = current_loader {
-        if loaders.get(loader).context("Error getting loader")?.is_invalid() {
+        if loaders
+            .get(loader)
+            .context("Error getting loader")?
+            .is_invalid()
+        {
             log::info!("Reloading app...");
             *screen_invalidated = true;
         }

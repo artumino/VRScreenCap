@@ -1,10 +1,15 @@
 use ash::vk;
-use wgpu::{TextureDescriptor, Device, TextureFormat};
+use wgpu::{Device, TextureDescriptor, TextureFormat};
 use wgpu_hal::api::Vulkan;
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::*;
 
-pub fn vulkan_image_to_texture(device: &Device, image: vk::Image, tex_desc: TextureDescriptor, hal_tex_desc: wgpu_hal::TextureDescriptor) -> wgpu::Texture {
+pub fn vulkan_image_to_texture(
+    device: &Device,
+    image: vk::Image,
+    tex_desc: TextureDescriptor,
+    hal_tex_desc: wgpu_hal::TextureDescriptor,
+) -> wgpu::Texture {
     let texture = unsafe {
         <wgpu_hal::api::Vulkan as wgpu_hal::Api>::Device::texture_from_raw(
             image,
@@ -13,16 +18,10 @@ pub fn vulkan_image_to_texture(device: &Device, image: vk::Image, tex_desc: Text
         )
     };
 
-    unsafe {
-        device.create_texture_from_hal::<Vulkan>(
-            texture,
-            &tex_desc,
-        )
-    }
+    unsafe { device.create_texture_from_hal::<Vulkan>(texture, &tex_desc) }
 }
 
-
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
     match format {
         DXGI_FORMAT_R8_UNORM => TextureFormat::R8Unorm,

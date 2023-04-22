@@ -57,7 +57,12 @@ impl Camera {
     }
 
     pub fn build_view_projection_matrix(&self) -> anyhow::Result<Matrix4<f32>> {
-        Ok(self.projection * self.entity.world_matrix.invert().context("Provided world matrix is not invertible")?)
+        Ok(self.projection
+            * self
+                .entity
+                .world_matrix
+                .invert()
+                .context("Provided world matrix is not invertible")?)
     }
 }
 
@@ -78,7 +83,7 @@ impl CameraUniform {
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) -> anyhow::Result<()>{
+    pub fn update_view_proj(&mut self, camera: &Camera) -> anyhow::Result<()> {
         self.view_proj = camera.build_view_projection_matrix()?.into();
         Ok(())
     }

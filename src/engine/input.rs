@@ -9,7 +9,7 @@ pub struct InputContext {
     pub default_left_hand: Action<Posef>,
     pub default_right_hand_space: Option<Space>,
     pub default_left_hand_space: Option<Space>,
-    pub input_state: Option<InputState>
+    pub input_state: Option<InputState>,
 }
 
 pub struct InputState {
@@ -101,25 +101,48 @@ impl InputContext {
         .sqrt();
 
         let right_active = self.default_right_hand.is_active(xr_session, Path::NULL)?
-            && right_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
-            && right_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
+            && right_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_TRACKED)
+            && right_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_VALID);
         let left_active = self.default_left_hand.is_active(xr_session, Path::NULL)?
-            && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
-            && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
+            && left_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_TRACKED)
+            && left_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_VALID);
 
-        let new_state = Self::compute_input_state(&self.input_state, right_active, right_hand_distance, left_active, left_hand_distance);
+        let new_state = Self::compute_input_state(
+            &self.input_state,
+            right_active,
+            right_hand_distance,
+            left_active,
+            left_hand_distance,
+        );
         self.input_state = Some(new_state);
 
         Ok(())
     }
 
-    fn compute_input_state(input_state: &Option<InputState>, right_active: bool, right_hand_distance: f32, left_active: bool, left_hand_distance: f32) -> InputState {
-        
-        let hands_near_head =
-            ((right_active && right_hand_distance < 0.3) as u8) + ((left_active && left_hand_distance < 0.3) as u8);
+    fn compute_input_state(
+        input_state: &Option<InputState>,
+        right_active: bool,
+        right_hand_distance: f32,
+        left_active: bool,
+        left_hand_distance: f32,
+    ) -> InputState {
+        let hands_near_head = ((right_active && right_hand_distance < 0.3) as u8)
+            + ((left_active && left_hand_distance < 0.3) as u8);
 
         if input_state.is_none() {
-            return InputState{hands_near_head, near_start: Instant::now(), count_change: Instant::now()};
+            return InputState {
+                hands_near_head,
+                near_start: Instant::now(),
+                count_change: Instant::now(),
+            };
         }
 
         let input_state = input_state.as_ref().unwrap();
@@ -134,7 +157,11 @@ impl InputContext {
         } else {
             input_state.count_change
         };
-        
-        InputState{hands_near_head, near_start, count_change}
+
+        InputState {
+            hands_near_head,
+            near_start,
+            count_change,
+        }
     }
 }

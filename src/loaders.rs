@@ -2,7 +2,7 @@ use wgpu::{Device, Instance};
 
 use crate::engine::texture::Texture2D;
 
-#[cfg(target_os="windows")]
+#[cfg(target_os = "windows")]
 pub mod katanga_loader;
 
 pub struct TextureSource {
@@ -22,11 +22,7 @@ pub enum StereoMode {
 }
 
 pub trait Loader {
-    fn load(
-        &mut self,
-        instance: &Instance,
-        device: &Device,
-    ) -> anyhow::Result<TextureSource>;
+    fn load(&mut self, instance: &Instance, device: &Device) -> anyhow::Result<TextureSource>;
 
     fn is_invalid(&self) -> bool;
 }
