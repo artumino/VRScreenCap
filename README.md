@@ -41,6 +41,7 @@ vr-screen-cap.exe [OPTIONS]
     --flip-y=false
     --distance=20.0
     --scale=10.0
+    --ambient=false
     --config-file=<file-path>
 ```
 Where every distance is in meters. The effects of horizontal and vertical curvature are summed together, with a curvature of 1.0 the center of the screen will be bent inwards of about half its size.
