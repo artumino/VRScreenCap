@@ -1,49 +1,65 @@
 [package]
 name = "vr-screen-cap"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
+build = "build.rs"
+authors = ["Jacopo Libe <jacopo.libe@gmail.com>"]
+description = "A very simple rust program that uses the Vulkan backend of WPGU combined with OpenXR to show a virtual screen for geo11 games."
+license = "MIT"
+repository = "https://github.com/artumino/VRScreenCap"
+
+[lib]
+name = "vr_screen_cap_core"
+crate-type = ["lib", "cdylib"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = "0.13.1"
-wgpu-hal = { version = "0.13.1", features = ["vulkan"] }
-ash = "0.37.0"
+wgpu = { git = "https://github.com/artumino/wgpu.git", branch = "feature/multiview_relaxed_validation" }
+wgpu-hal = { git = "https://github.com/artumino/wgpu.git", branch = "feature/multiview_relaxed_validation", features = ["vulkan"] }
+ash = "0.37.2"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
-openxr = { version = "0.16.0", features=["static", "mint"] }
-bytemuck = { version = "1.11.0", features = [ "derive" ] }
-tray-item = "0.7.0"
-log4rs = "1.1.1"
+bytemuck = { version = "1.13.1", features = [ "derive" ] }
+log4rs = "1.2.0"
 log = "0.4.17"
 log-panics = { version = "2.1.0", features=["with-backtrace"] }
-clap = { version = "3.2.15", features=["derive"] }
-thread-priority = "0.8.2"
-serde = "1.0.143"
-serde_json = "1.0.83"
-notify = "4.0.17"
-dhat = { version = "0.3.0", optional = true }
-renderdoc = { version = "0.10.1", optional = true }
+clap = { version = "4.2.2", features=["derive"] }
+thread-priority = "0.13.1"
+serde = "1.0.160"
+serde_json = "1.0.96"
+notify = "5.1.0"
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+dhat = { version = "0.3.2", optional = true }
+renderdoc = { version = "0.11.0", optional = true }
+profiling = { version = "1.0.8", optional = true, features = ["profile-with-tracy"] }
+tracy-client = { version = "0.15.2", optional = true }
+anyhow = "1.0.70"
+tobj = "3.2.5"
 
-[dependencies.image]
-version = "0.24"
-default-features = false
-features = ["png", "jpeg"]
+# PLATFORM DEPENDENT
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tray-item = "0.7.1"
+windows = { version = "0.48.0", features = [
+        "Win32_System_Memory",
+        "Win32_Security",
+        "Win32_Foundation",
+        "Win32_Graphics_Direct3D11",
+        "Win32_Graphics_Direct3D12",
+        "Win32_Graphics_Dxgi_Common",
+        "Win32_Graphics_Direct3D", 
+        "Win32_Graphics_Dxgi",
+        "Win32_System_Threading"
+]}
+openxr = { version = "0.17.1", features =  [ "static", "mint" ] }
 
-[dependencies.windows]
-version = "0.38.0"
-features = [
-    "alloc",
-    "Win32_System_Memory",
-    "Win32_Security",
-    "Win32_Foundation",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Direct3D12",
-    "Win32_Graphics_Dxgi_Common",
-    "Win32_Graphics_Direct3D", 
-    "Win32_Graphics_Dxgi",
-    "Win32_System_Threading"
-]
+[target.'cfg(target_os = "android")'.dependencies]
+openxr = { version = "0.17.1", features =  [ "loaded", "mint" ] }
+jni = "0.21.1"
+ndk = "0.7"
+ndk-glue = "0.7"
+
+# BUILD
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
@@ -52,3 +68,64 @@ winres = "0.1"
 default = ["renderdoc"]
 dhat-heap = ["dep:dhat"]
 renderdoc = ["dep:renderdoc"]
+profiling = ["dep:profiling", "dep:tracy-client"]
+
+# ANDROID
+[package.metadata.android]
+apk_label = "VR Screen Cap"
+fullscreen = true
+runtime_libs = "libs"
+target_sdk_version = 21
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+
+[package.metadata.android.application]
+debuggable = true
+label = "VR Screen Cap"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[package.metadata.android.application.activity]
+config_changes = "screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode"
+launch_mode = "singleTask"
+orientation = "landscape"
+
+[[package.metadata.android.application.meta_data]]
+name = "com.oculus.supportedDevices"
+value = "quest|quest2"
+
+[[package.metadata.android.application.meta_data]]
+name = "com.oculus.intent.category.VR"
+value = "vr_only"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["com.oculus.intent.category.VR", "android.intent.category.LAUNCHER"]
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "com.oculus.vr.focusaware"
+value = "true"
+
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.vulkan.level"
+required = true
+version = 0x00401000
+
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.vr.headtracking"
+required = true
+version = 1
+
+[package.metadata.android.signing.dev]
+path = "keys/artum-dev.keystore"
+keystore_password = "test1234"
+
+[package.metadata.android.signing.release]
+path = "keys/artum-dev.keystore"
+keystore_password = "test1234"

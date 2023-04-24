@@ -54,6 +54,21 @@ A json configuration file can be provided and it will be watched for changes, th
     "y_curvature": 0.08
 }
 ```
+
+## Build Info
+
+### Windows
+The release version published here were compiled with the following configuration:
+```
+cargo build --release --no-default-features
+```
+
+### Android Targets
+Standalone is still in experimental phase:
+1. Install *cargo-apk* `cargo install cargo-apk`
+2. Add android targets to your rust installation `rustup target add aarch64-linux-android`
+3. Build through `cargo apk build --no-default-features`
+
 ## WMR Users Disclaimer
 
 This application uses Vulkan as its backend. To the best of my knowledge WMR still doesn't support OpenXR Vulkan applications so this one won't work out of the box for you. You can try to run VR Screen Cap through projects like [OpenXR-Vk-D3D12](https://github.com/mbucchia/OpenXR-Vk-D3D12) but I can't guarantee It'll work.

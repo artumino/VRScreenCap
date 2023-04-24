@@ -1,3 +1,4 @@
+use anyhow::Context;
 use cgmath::{Matrix4, Rad, SquareMatrix};
 use openxr::Fovf;
 
@@ -55,8 +56,13 @@ impl Camera {
         self.projection = cgmath::perspective(fov, aspect_ratio, self.near, self.far)
     }
 
-    pub fn build_view_projection_matrix(&self) -> Matrix4<f32> {
-        self.projection * self.entity.world_matrix.invert().unwrap()
+    pub fn build_view_projection_matrix(&self) -> anyhow::Result<Matrix4<f32>> {
+        Ok(self.projection
+            * self
+                .entity
+                .world_matrix
+                .invert()
+                .context("Provided world matrix is not invertible")?)
     }
 }
 
@@ -77,7 +83,8 @@ impl CameraUniform {
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+    pub fn update_view_proj(&mut self, camera: &Camera) -> anyhow::Result<()> {
+        self.view_proj = camera.build_view_projection_matrix()?.into();
+        Ok(())
     }
 }

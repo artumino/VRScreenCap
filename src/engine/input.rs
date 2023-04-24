@@ -1,5 +1,6 @@
-use std::{error::Error, time::Instant};
+use std::time::Instant;
 
+use anyhow::Context;
 use openxr::{Action, ActionSet, Binding, FrameState, Instance, Path, Posef, Session, Space};
 
 pub struct InputContext {
@@ -8,7 +9,7 @@ pub struct InputContext {
     pub default_left_hand: Action<Posef>,
     pub default_right_hand_space: Option<Space>,
     pub default_left_hand_space: Option<Space>,
-    pub input_state: Option<InputState>
+    pub input_state: Option<InputState>,
 }
 
 pub struct InputState {
@@ -18,7 +19,7 @@ pub struct InputState {
 }
 
 impl InputContext {
-    pub fn init(xr_instance: &Instance) -> Result<InputContext, Box<dyn Error>> {
+    pub fn init(xr_instance: &Instance) -> anyhow::Result<InputContext> {
         let default_set =
             xr_instance.create_action_set("default", "Default controller actions", 0)?;
 
@@ -50,7 +51,7 @@ impl InputContext {
         })
     }
 
-    pub fn attach_to_session<T>(&mut self, xr_session: &Session<T>) -> Result<(), Box<dyn Error>> {
+    pub fn attach_to_session<T>(&mut self, xr_session: &Session<T>) -> anyhow::Result<()> {
         xr_session.attach_action_sets(&[&self.default])?;
 
         self.default_right_hand_space = Some(self.default_right_hand.create_space(
@@ -74,22 +75,20 @@ impl InputContext {
         xr_frame_state: &FrameState,
         _xr_reference_space: &Space,
         xr_view_space: &Space,
-    ) {
-        xr_session.sync_actions(&[(&self.default).into()]).unwrap();
+    ) -> anyhow::Result<()> {
+        xr_session.sync_actions(&[(&self.default).into()])?;
 
         let right_location = self
             .default_right_hand_space
             .as_ref()
-            .unwrap()
-            .locate(xr_view_space, xr_frame_state.predicted_display_time)
-            .unwrap();
+            .context("Right hand space not initialized")?
+            .locate(xr_view_space, xr_frame_state.predicted_display_time)?;
 
         let left_location = self
             .default_left_hand_space
             .as_ref()
-            .unwrap()
-            .locate(xr_view_space, xr_frame_state.predicted_display_time)
-            .unwrap();
+            .context("Left hand space not initialized")?
+            .locate(xr_view_space, xr_frame_state.predicted_display_time)?;
 
         let right_hand_distance = (right_location.pose.position.x.powi(2)
             + right_location.pose.position.y.powi(2)
@@ -101,32 +100,68 @@ impl InputContext {
             + left_location.pose.position.z.powi(2))
         .sqrt();
 
-        let right_active = self.default_right_hand.is_active(xr_session, Path::NULL).unwrap()
-            && right_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
-            && right_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
-        let left_active = self.default_left_hand.is_active(xr_session, Path::NULL).unwrap()
-            && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_TRACKED) 
-            && left_location.location_flags.contains(openxr::SpaceLocationFlags::POSITION_VALID);
+        let right_active = self.default_right_hand.is_active(xr_session, Path::NULL)?
+            && right_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_TRACKED)
+            && right_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_VALID);
+        let left_active = self.default_left_hand.is_active(xr_session, Path::NULL)?
+            && left_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_TRACKED)
+            && left_location
+                .location_flags
+                .contains(openxr::SpaceLocationFlags::POSITION_VALID);
 
-        let hands_near_head =
-            ((right_active && right_hand_distance < 0.3) as u8) + ((left_active && left_hand_distance < 0.3) as u8);
+        let new_state = Self::compute_input_state(
+            &self.input_state,
+            right_active,
+            right_hand_distance,
+            left_active,
+            left_hand_distance,
+        );
+        self.input_state = Some(new_state);
 
-        let near_start = if self.input_state.is_some() && self.input_state.as_ref().unwrap().hands_near_head > 0 {
-            self.input_state.as_ref().unwrap().near_start
+        Ok(())
+    }
+
+    fn compute_input_state(
+        input_state: &Option<InputState>,
+        right_active: bool,
+        right_hand_distance: f32,
+        left_active: bool,
+        left_hand_distance: f32,
+    ) -> InputState {
+        let hands_near_head = ((right_active && right_hand_distance < 0.3) as u8)
+            + ((left_active && left_hand_distance < 0.3) as u8);
+
+        if input_state.is_none() {
+            return InputState {
+                hands_near_head,
+                near_start: Instant::now(),
+                count_change: Instant::now(),
+            };
+        }
+
+        let input_state = input_state.as_ref().unwrap();
+        let near_start = if input_state.hands_near_head > 0 {
+            input_state.near_start
         } else {
             Instant::now()
         };
 
-        let count_change = if self.input_state.is_none() || self.input_state.as_ref().unwrap().hands_near_head != hands_near_head {
+        let count_change = if input_state.hands_near_head != hands_near_head {
             Instant::now()
         } else {
-            self.input_state.as_ref().unwrap().count_change
+            input_state.count_change
         };
 
-        self.input_state = Some(InputState {
+        InputState {
             hands_near_head,
             near_start,
-            count_change
-        });
+            count_change,
+        }
     }
 }
