@@ -7,7 +7,7 @@ use wgpu_hal as hal;
 
 use crate::conversions::vulkan_image_to_texture;
 
-use super::{texture::Texture2D, WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION};
+use super::{texture::{Texture2D, Unbound}, WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION};
 
 pub struct OpenXRContext {
     pub entry: openxr::Entry,
@@ -351,7 +351,7 @@ impl OpenXRContext {
     ) -> anyhow::Result<(
         openxr::Swapchain<openxr::Vulkan>,
         vk::Extent2D,
-        Vec<Texture2D>,
+        Vec<Texture2D<Unbound>>,
     )> {
         log::info!("Creating OpenXR swapchain");
 
@@ -423,7 +423,7 @@ impl OpenXRContext {
                     wgpu_hal_tex_desc,
                 );
 
-                Texture2D::from_wgpu(device, wgpu_texture)
+                Texture2D::<Unbound>::from_wgpu(device, wgpu_texture)
             })
             .collect();
 

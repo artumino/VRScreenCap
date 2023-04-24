@@ -1,12 +1,12 @@
 use wgpu::{Device, Instance};
 
-use crate::engine::texture::Texture2D;
+use crate::engine::texture::{Texture2D, Unbound};
 
 #[cfg(target_os = "windows")]
 pub mod katanga_loader;
 
 pub struct TextureSource {
-    pub texture: Texture2D,
+    pub texture: Texture2D<Unbound>,
     pub width: u32,
     pub height: u32,
     pub stereo_mode: StereoMode,

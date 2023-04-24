@@ -24,7 +24,7 @@ use windows::{
 
 use crate::{
     conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture},
-    engine::texture::Texture2D,
+    engine::texture::{Texture2D, Unbound},
 };
 
 use super::{Loader, TextureSource};
@@ -119,7 +119,7 @@ impl Loader for KatangaLoaderContext {
                         .array_layers(tex_info.array_size)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                        .usage(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::SAMPLED)
                         .sharing_mode(vk::SharingMode::CONCURRENT);
 
                     let raw_image = raw_device.create_image(&image_create_info, None)?;
@@ -147,7 +147,7 @@ impl Loader for KatangaLoaderContext {
                     dimension: wgpu::TextureDimension::D2,
                     format: tex_info.format,
                     view_formats: &[],
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
                 },
                 TextureDescriptor {
                     label: "KatangaStream".into(),
@@ -161,13 +161,13 @@ impl Loader for KatangaLoaderContext {
                     dimension: wgpu::TextureDimension::D2,
                     format: tex_info.format,
                     view_formats: vec![],
-                    usage: TextureUses::EXCLUSIVE,
+                    usage: TextureUses::RESOURCE | TextureUses::COPY_SRC,
                     memory_flags: MemoryFlags::empty(),
                 },
             );
 
             return Ok(TextureSource {
-                texture: Texture2D::from_wgpu(device, texture),
+                texture: Texture2D::<Unbound>::from_wgpu(device, texture),
                 width: tex_info.width,
                 height: tex_info.height,
                 stereo_mode: crate::loaders::StereoMode::FullSbs,

@@ -12,6 +12,9 @@ pub struct ScreenParamsUniform {
     eye_offset: f32,
     y_offset: f32,
     x_offset: f32,
+    aspect_ratio: f32,
+    screen_width: u32,
+    ambient_width: u32
 }
 
 #[derive(Parser, Serialize, Deserialize, Debug, Clone)]
@@ -38,13 +41,16 @@ pub struct AppConfig {
     // Screen scaling factor (screen width in meters), default: 40.0, usage: --scale=40.0
     #[clap(short, long, value_parser, default_value_t = 40.0)]
     pub scale: f32,
+    // Wether ambient light should be used, default: false, usage: --ambient=true
+    #[clap(short, long, value_parser, default_value_t = false)]
+    pub ambient: bool,
     // Configuration file to watch for live changes, usage: --config-file=config.json
     #[clap(short, long, value_parser)]
     pub config_file: Option<String>,
 }
 
 impl AppConfig {
-    pub fn uniform(&self) -> ScreenParamsUniform {
+    pub fn uniform(&self, aspect_ratio: f32, screen_width: u32, ambient_width: u32) -> ScreenParamsUniform {
         ScreenParamsUniform {
             x_curvature: self.x_curvature,
             y_curvature: self.y_curvature,
@@ -60,6 +66,9 @@ impl AppConfig {
                 true => 1.0,
                 _ => 0.0,
             },
+            aspect_ratio,
+            screen_width,
+            ambient_width
         }
     }
 }
@@ -75,6 +84,39 @@ impl Default for AppConfig {
             distance: 20.0,
             scale: 40.0,
             config_file: None,
+            ambient: false,
+        }
+    }
+}
+
+//Blur Settings
+
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TemporalBlurParamsUniform {
+    jitter: [f32; 2],
+    scale: [f32; 2],
+    resolution: [f32; 2],
+    history_decay: f32,
+    _padding: f32,
+}
+
+pub struct TemporalBlurParams {
+    pub jitter: [f32; 2],
+    pub scale: [f32; 2],
+    pub resolution: [f32; 2],
+    pub history_decay: f32,
+}
+
+impl TemporalBlurParams {
+    pub fn uniform(&self) -> TemporalBlurParamsUniform {
+        TemporalBlurParamsUniform {
+            jitter: self.jitter,
+            scale: self.scale,
+            resolution: self.resolution,
+            history_decay: self.history_decay,
+            _padding: 0.0,
         }
     }
 }
