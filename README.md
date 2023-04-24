@@ -1,6 +1,6 @@
-# VRScreenCap
-## Description
-This is a very simple rust program that uses the Vulkan backend of WPGU combined with OpenXR to show a virtual screen.
+# ![VRScreenCap](RepoAssets/banner.webp)
+
+VRScreenCap is a very simple rust program that uses the Vulkan backend of WPGU combined with OpenXR to show a virtual screen.
 
 ## Disclaimer
 This was a pet project done in a few days of work, it doesn't offer any customization options and QoL features since It was meant to do just one thing.
