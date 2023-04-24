@@ -11,7 +11,7 @@ use engine::{
     geometry::{ModelVertex, Vertex},
     input::InputContext,
     screen::Screen,
-    texture::{Texture2D, RoundRobinTextureBuffer, Bound, Unbound},
+    texture::{Bound, RoundRobinTextureBuffer, Texture2D, Unbound},
     vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader,
 };
@@ -272,22 +272,38 @@ fn run(
                 label: Some("texture_bind_group_layout"),
             });
 
-    let mut screen_texture = blank_texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
-    let mut ambient_texture = get_ambient_texture(&screen_texture, 1.0, &StereoMode::Mono, wgpu_context, &texture_bind_group_layout)?;
+    let mut screen_texture =
+        blank_texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
+    let mut ambient_texture = get_ambient_texture(
+        &screen_texture,
+        1.0,
+        &StereoMode::Mono,
+        wgpu_context,
+        &texture_bind_group_layout,
+    )?;
 
     if let Some((texture, aspect, mode, loader)) = try_to_load_texture(&mut loaders, wgpu_context) {
         screen_texture = texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
-        ambient_texture = get_ambient_texture(&screen_texture, aspect, &mode, wgpu_context, &texture_bind_group_layout)?;
+        ambient_texture = get_ambient_texture(
+            &screen_texture,
+            aspect,
+            &mode,
+            wgpu_context,
+            &texture_bind_group_layout,
+        )?;
         aspect_ratio = aspect;
         stereo_mode = mode;
         current_loader = Some(loader);
     }
 
-    let fullscreen_triangle_index_buffer = wgpu_context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Fullscreen Tri Index Buffer"),
-        contents: bytemuck::cast_slice(&[0,1,2]),
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let fullscreen_triangle_index_buffer =
+        wgpu_context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Fullscreen Tri Index Buffer"),
+                contents: bytemuck::cast_slice(&[0, 1, 2]),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
     let mut screen_params = match config {
         Some(ConfigContext {
@@ -300,8 +316,10 @@ fn run(
     let mut temporal_blur_params = TemporalBlurParams {
         jitter: [0.0, 0.0],
         scale: [1.1, 1.1],
-        resolution: [ambient_texture.current().texture.width() as f32, 
-                     ambient_texture.current().texture.height() as f32],
+        resolution: [
+            ambient_texture.current().texture.width() as f32,
+            ambient_texture.current().texture.height() as f32,
+        ],
         history_decay: 0.985,
     };
 
@@ -323,13 +341,13 @@ fn run(
             });
 
     let temporal_blur_params_buffer =
-            wgpu_context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Temporal Blur Params Buffer"),
-                    contents: bytemuck::cast_slice(&[temporal_blur_params.uniform()]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
+        wgpu_context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Temporal Blur Params Buffer"),
+                contents: bytemuck::cast_slice(&[temporal_blur_params.uniform()]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
     let screen_model_matrix_buffer =
         wgpu_context
@@ -355,18 +373,16 @@ fn run(
         wgpu_context
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
+                    count: None,
+                }],
                 label: Some("global_temporal_blur_bind_group_layout"),
             });
 
@@ -431,37 +447,42 @@ fn run(
                 label: Some("global_uniform_bind_group"),
             });
 
-        let global_temporal_blur_uniform_bind_group =
-            wgpu_context
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &global_temporal_blur_uniform_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: temporal_blur_params_buffer.as_entire_binding(),
-                        },
-                    ],
-                    label: Some("global_temporal_blur_uniform_bind_group"),
-                });
+    let global_temporal_blur_uniform_bind_group =
+        wgpu_context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &global_temporal_blur_uniform_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: temporal_blur_params_buffer.as_entire_binding(),
+                }],
+                label: Some("global_temporal_blur_uniform_bind_group"),
+            });
 
     let render_pipeline_layout =
         wgpu_context
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout, &global_uniform_bind_group_layout],
+                bind_group_layouts: &[
+                    &texture_bind_group_layout,
+                    &global_uniform_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
 
     let blit_pipeline_layout =
-            wgpu_context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Blit Pipeline Layout"),
-                    bind_group_layouts: &[&texture_bind_group_layout, &texture_bind_group_layout, &global_temporal_blur_uniform_layout],
-                    push_constant_ranges: &[],
-                });
+        wgpu_context
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Blit Pipeline Layout"),
+                bind_group_layouts: &[
+                    &texture_bind_group_layout,
+                    &texture_bind_group_layout,
+                    &global_temporal_blur_uniform_layout,
+                ],
+                push_constant_ranges: &[],
+            });
 
     let screen_render_pipeline =
         wgpu_context
@@ -489,31 +510,31 @@ fn run(
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
 
-        let ambient_dome_pipeline =
-            wgpu_context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Ambient Dome Pipeline"),
-                    layout: Some(&render_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &screen_shader,
-                        entry_point: "mv_vs_main",
-                        buffers: &[ModelVertex::desc()],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &screen_shader,
-                        entry_point: "vignette_fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: NonZeroU32::new(VIEW_COUNT),
-                });
+    let ambient_dome_pipeline =
+        wgpu_context
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Ambient Dome Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &screen_shader,
+                    entry_point: "mv_vs_main",
+                    buffers: &[ModelVertex::desc()],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &screen_shader,
+                    entry_point: "vignette_fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: SWAPCHAIN_COLOR_FORMAT,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: NonZeroU32::new(VIEW_COUNT),
+            });
 
     let temporal_blur_pipeline =
         wgpu_context
@@ -529,16 +550,18 @@ fn run(
                 fragment: Some(wgpu::FragmentState {
                     module: &blit_shader,
                     entry_point: "temporal_fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    targets: &[
+                        Some(wgpu::ColorTargetState {
+                            format: SWAPCHAIN_COLOR_FORMAT,
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                        Some(wgpu::ColorTargetState {
+                            format: SWAPCHAIN_COLOR_FORMAT,
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                    ],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -605,7 +628,13 @@ fn run(
                 try_to_load_texture(&mut loaders, wgpu_context)
             {
                 screen_texture = texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
-                ambient_texture = get_ambient_texture(&screen_texture, aspect, &mode, wgpu_context, &texture_bind_group_layout)?;
+                ambient_texture = get_ambient_texture(
+                    &screen_texture,
+                    aspect,
+                    &mode,
+                    wgpu_context,
+                    &texture_bind_group_layout,
+                )?;
                 aspect_ratio = aspect;
                 stereo_mode = mode;
                 current_loader = Some(loader);
@@ -616,7 +645,7 @@ fn run(
                     0,
                     bytemuck::cast_slice(&[screen.entity.uniform()]),
                 );
-                
+
                 let width_multiplier = match &stereo_mode {
                     StereoMode::FullSbs => 2,
                     _ => 1,
@@ -625,9 +654,10 @@ fn run(
                 wgpu_context.queue.write_buffer(
                     &screen_params_buffer,
                     0,
-                    bytemuck::cast_slice(&[screen_params.uniform(aspect, 
-                        screen_texture.texture.width() * width_multiplier, 
-                        ambient_texture.current().texture.width()  * width_multiplier
+                    bytemuck::cast_slice(&[screen_params.uniform(
+                        aspect,
+                        screen_texture.texture.width() * width_multiplier,
+                        ambient_texture.current().texture.width() * width_multiplier,
                     )]),
                 );
             }
@@ -738,27 +768,30 @@ fn run(
                     );
                     if screen.ambient_enabled {
                         ambient_texture.next();
-                        let mut blit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("Blit Pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &ambient_texture.current().view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            }),
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &ambient_texture.previous(1).view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                        });
-                        
+                        let mut blit_pass =
+                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Blit Pass"),
+                                color_attachments: &[
+                                    Some(wgpu::RenderPassColorAttachment {
+                                        view: &ambient_texture.current().view,
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                            store: true,
+                                        },
+                                    }),
+                                    Some(wgpu::RenderPassColorAttachment {
+                                        view: &ambient_texture.previous(1).view,
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                            store: true,
+                                        },
+                                    }),
+                                ],
+                                depth_stencil_attachment: None,
+                            });
+
                         blit_pass.set_pipeline(&temporal_blur_pipeline);
                         blit_pass.set_bind_group(0, screen_texture.bind_group(), &[]);
                         blit_pass.set_bind_group(1, ambient_texture.previous(2).bind_group(), &[]);
@@ -782,7 +815,7 @@ fn run(
                             })],
                             depth_stencil_attachment: None,
                         });
-                        
+
                         // Render the ambient dome
                         if screen.ambient_enabled {
                             let ambient_mesh = &screen.ambient_mesh;
@@ -853,9 +886,13 @@ fn run(
                     if screen.ambient_enabled {
                         log::trace!("Writing temporal blur uniforms");
                         let ambient_texture = &ambient_texture.current().texture;
-                        let resolution = [ambient_texture.width() as f32, ambient_texture.height() as f32];
+                        let resolution = [
+                            ambient_texture.width() as f32,
+                            ambient_texture.height() as f32,
+                        ];
                         jitter_frame = (jitter_frame + 1) % AMBIENT_BLUR_TEMPORAL_SAMPLES;
-                        temporal_blur_params.jitter = engine::jitter::get_jitter(jitter_frame, &resolution);
+                        temporal_blur_params.jitter =
+                            engine::jitter::get_jitter(jitter_frame, &resolution);
                         temporal_blur_params.resolution = resolution;
                         wgpu_context.queue.write_buffer(
                             &temporal_blur_params_buffer,
@@ -1026,7 +1063,7 @@ fn run(
                         _ => {}
                     }
                     screen_invalidated = true;
-                },
+                }
                 ToggleSetting::AmbientLight => {
                     screen_params.ambient = !screen_params.ambient;
                     screen.change_ambient_mode(screen_params.ambient);
@@ -1063,7 +1100,13 @@ fn run(
     Ok(())
 }
 
-fn get_ambient_texture(screen_texture: &Texture2D<Bound>, aspect: f32, stereo_mode: &StereoMode, wgpu_context: &WgpuContext, bind_group_layout: &BindGroupLayout) -> anyhow::Result<RoundRobinTextureBuffer<Texture2D<Bound>, 3>> {
+fn get_ambient_texture(
+    screen_texture: &Texture2D<Bound>,
+    aspect: f32,
+    stereo_mode: &StereoMode,
+    wgpu_context: &WgpuContext,
+    bind_group_layout: &BindGroupLayout,
+) -> anyhow::Result<RoundRobinTextureBuffer<Texture2D<Bound>, 3>> {
     let height_multiplier = match stereo_mode {
         StereoMode::FullTab => 2,
         _ => 1,
@@ -1074,18 +1117,28 @@ fn get_ambient_texture(screen_texture: &Texture2D<Bound>, aspect: f32, stereo_mo
         _ => 1,
     };
 
-    let buffer = RoundRobinTextureBuffer::new((0..3)
-    .map(|idx|
-        screen_texture.as_render_target_with_extent(format!("Ambient Texture {idx}").as_str(), wgpu::Extent3d{
-            width: AMBIENT_BLUR_BASE_RES * width_multiplier,
-            height: (AMBIENT_BLUR_BASE_RES as f32 / aspect) as u32 * height_multiplier,
-            depth_or_array_layers: screen_texture.texture.depth_or_array_layers(),
-        }, SWAPCHAIN_COLOR_FORMAT, &wgpu_context.device).bind_to_context(wgpu_context, bind_group_layout)
-    )
-    .collect::<Vec<_>>()
-    .try_into()
-    .ok()
-    .context("Cannot create ambient texture buffer")?);
+    let buffer = RoundRobinTextureBuffer::new(
+        (0..3)
+            .map(|idx| {
+                screen_texture
+                    .as_render_target_with_extent(
+                        format!("Ambient Texture {idx}").as_str(),
+                        wgpu::Extent3d {
+                            width: AMBIENT_BLUR_BASE_RES * width_multiplier,
+                            height: (AMBIENT_BLUR_BASE_RES as f32 / aspect) as u32
+                                * height_multiplier,
+                            depth_or_array_layers: screen_texture.texture.depth_or_array_layers(),
+                        },
+                        SWAPCHAIN_COLOR_FORMAT,
+                        &wgpu_context.device,
+                    )
+                    .bind_to_context(wgpu_context, bind_group_layout)
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .ok()
+            .context("Cannot create ambient texture buffer")?,
+    );
 
     Ok(buffer)
 }

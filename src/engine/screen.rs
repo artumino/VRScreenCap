@@ -22,10 +22,11 @@ impl Screen {
         Screen {
             mesh: Mesh::get_plane_rectangle(device, 100, 100, 1.0, 1.0, 0.0),
             ambient_mesh: Mesh::from_asset(
-                    device,
-                    include_bytes!("../../assets/ambient_dome.obj"),
-                    100.0,
-                    65.0),
+                device,
+                include_bytes!("../../assets/ambient_dome.obj"),
+                100.0,
+                65.0,
+            ),
             ambient_enabled,
             entity: Entity::new(
                 0,

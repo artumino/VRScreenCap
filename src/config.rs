@@ -14,7 +14,7 @@ pub struct ScreenParamsUniform {
     x_offset: f32,
     aspect_ratio: f32,
     screen_width: u32,
-    ambient_width: u32
+    ambient_width: u32,
 }
 
 #[derive(Parser, Serialize, Deserialize, Debug, Clone)]
@@ -50,7 +50,12 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn uniform(&self, aspect_ratio: f32, screen_width: u32, ambient_width: u32) -> ScreenParamsUniform {
+    pub fn uniform(
+        &self,
+        aspect_ratio: f32,
+        screen_width: u32,
+        ambient_width: u32,
+    ) -> ScreenParamsUniform {
         ScreenParamsUniform {
             x_curvature: self.x_curvature,
             y_curvature: self.y_curvature,
@@ -68,7 +73,7 @@ impl AppConfig {
             },
             aspect_ratio,
             screen_width,
-            ambient_width
+            ambient_width,
         }
     }
 }
@@ -90,7 +95,6 @@ impl Default for AppConfig {
 }
 
 //Blur Settings
-
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]

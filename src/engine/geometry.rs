@@ -118,7 +118,12 @@ impl Mesh {
         }
     }
 
-    pub fn from_asset(device: &wgpu::Device, asset: &'static [u8], scale: f32, distance: f32) -> Mesh {
+    pub fn from_asset(
+        device: &wgpu::Device,
+        asset: &'static [u8],
+        scale: f32,
+        distance: f32,
+    ) -> Mesh {
         let obj_cursor = Cursor::new(asset);
         let mut obj_reader = BufReader::new(obj_cursor);
         let (models, _) = tobj::load_obj_buf(

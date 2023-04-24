@@ -67,7 +67,8 @@ impl<State> Texture2D<State> {
             size,
         );
 
-        let (view, sampler) = Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
+        let (view, sampler) =
+            Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
 
         Texture2D::<Unbound> {
             texture,
@@ -78,8 +79,14 @@ impl<State> Texture2D<State> {
         }
     }
 
-    pub fn as_render_target_with_extent(&self, label: &str, extent: wgpu::Extent3d, format: wgpu::TextureFormat, device: &wgpu::Device) -> Texture2D<Unbound> {
-        let desc = &TextureDescriptor{
+    pub fn as_render_target_with_extent(
+        &self,
+        label: &str,
+        extent: wgpu::Extent3d,
+        format: wgpu::TextureFormat,
+        device: &wgpu::Device,
+    ) -> Texture2D<Unbound> {
+        let desc = &TextureDescriptor {
             label: Some(label),
             size: extent,
             mip_level_count: 1,
@@ -90,7 +97,8 @@ impl<State> Texture2D<State> {
             view_formats: &[],
         };
         let texture = device.create_texture(desc);
-        let (view, sampler) = Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
+        let (view, sampler) =
+            Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
         Texture2D::<Unbound> {
             texture,
             view,
@@ -101,7 +109,8 @@ impl<State> Texture2D<State> {
     }
 
     pub fn from_wgpu(device: &wgpu::Device, texture: wgpu::Texture) -> Texture2D<Unbound> {
-        let (view, sampler) = Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
+        let (view, sampler) =
+            Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
         Texture2D::<Unbound> {
             texture,
             view,
@@ -114,7 +123,7 @@ impl<State> Texture2D<State> {
     fn get_view_and_sampler(
         device: &wgpu::Device,
         texture: &wgpu::Texture,
-        filter_mode: wgpu::FilterMode
+        filter_mode: wgpu::FilterMode,
     ) -> (wgpu::TextureView, wgpu::Sampler) {
         (
             texture.create_view(&wgpu::TextureViewDescriptor::default()),
@@ -135,25 +144,27 @@ impl Texture2D<Unbound> {
     pub fn bind_to_context(
         self,
         wgpu_context: &WgpuContext,
-        bind_group_layout: &wgpu::BindGroupLayout
+        bind_group_layout: &wgpu::BindGroupLayout,
     ) -> Texture2D<Bound> {
         Texture2D::<Bound> {
-            bind_group: Some(wgpu_context
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&self.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler),
-                        },
-                    ],
-                    label: Some("Texture Bind Group"),
-                })),
+            bind_group: Some(
+                wgpu_context
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        layout: bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&self.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                        label: Some("Texture Bind Group"),
+                    }),
+            ),
             texture: self.texture,
             view: self.view,
             sampler: self.sampler,
@@ -176,10 +187,7 @@ pub struct RoundRobinTextureBuffer<TextureType: Sized, const SIZE: usize> {
 
 impl<TextureType: Sized, const SIZE: usize> RoundRobinTextureBuffer<TextureType, SIZE> {
     pub fn new(textures: [TextureType; SIZE]) -> Self {
-        Self {
-            textures,
-            index: 0,
-        }
+        Self { textures, index: 0 }
     }
 
     pub fn current(&self) -> &TextureType {

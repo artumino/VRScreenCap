@@ -7,7 +7,10 @@ use wgpu_hal as hal;
 
 use crate::conversions::vulkan_image_to_texture;
 
-use super::{texture::{Texture2D, Unbound}, WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION};
+use super::{
+    texture::{Texture2D, Unbound},
+    WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION,
+};
 
 pub struct OpenXRContext {
     pub entry: openxr::Entry,

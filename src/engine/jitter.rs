@@ -15,9 +15,6 @@ pub fn get_jitter(jitter_index: u32, resolution: &[f32; 2]) -> [f32; 2] {
         2.0 * halton(jitter_index, 2) - 1.0,
         2.0 * halton(jitter_index, 3) - 1.0,
     ];
-    
-    [
-        jitter[0] / resolution[0],
-        jitter[1] / resolution[1],
-    ]
+
+    [jitter[0] / resolution[0], jitter[1] / resolution[1]]
 }
