@@ -1,14 +1,8 @@
 use anyhow::{anyhow, Context};
 use wgpu::Queue;
-use win_desktop_duplication::{
-    devices::AdapterFactory,
-    outputs::Display,
-    DesktopDuplicationApi,
-};
+use win_desktop_duplication::{devices::AdapterFactory, outputs::Display, DesktopDuplicationApi};
 
-use crate::{
-    engine::texture::{Bound, Texture2D, Unbound},
-};
+use crate::engine::texture::{Bound, Texture2D, Unbound};
 
 use super::Loader;
 
