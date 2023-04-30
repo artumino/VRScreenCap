@@ -115,7 +115,7 @@ impl WgpuLoader for OpenXRContext {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
 
-        let wgpu_limits = wgpu::Limits::downlevel_webgl2_defaults();
+        let wgpu_limits = wgpu::Limits::default();
 
         let wgpu_features = wgpu::Features::MULTIVIEW;
         let vk_target_version = TARGET_VULKAN_VERSION; // Vulkan 1.1 guarantees multiview support
