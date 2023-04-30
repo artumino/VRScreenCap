@@ -1,6 +1,6 @@
 use anyhow::{bail, Context};
 use ash::vk::{self, ImageCreateInfo};
-use wgpu::{Device, Instance, TextureFormat};
+use wgpu::{Device, Instance, Queue, TextureFormat};
 use wgpu_hal::{api::Vulkan, MemoryFlags, TextureDescriptor, TextureUses};
 use windows::{
     core::s,
@@ -24,7 +24,8 @@ use windows::{
 
 use crate::{
     conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture},
-    engine::texture::{Texture2D, Unbound},
+    engine::texture::{Bound, Texture2D, Unbound},
+    loaders::StereoMode,
 };
 
 use super::{Loader, TextureSource};
@@ -37,6 +38,7 @@ pub struct KatangaLoaderContext {
 }
 
 impl Loader for KatangaLoaderContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn load(&mut self, _instance: &Instance, device: &Device) -> anyhow::Result<TextureSource> {
         self.katanga_file_handle = unsafe {
             OpenFileMappingA(FILE_MAP_ALL_ACCESS.0, false, s!("Local\\KatangaMappedFile"))?
@@ -170,20 +172,34 @@ impl Loader for KatangaLoaderContext {
                 texture: Texture2D::<Unbound>::from_wgpu(device, texture),
                 width: tex_info.width,
                 height: tex_info.height,
-                stereo_mode: crate::loaders::StereoMode::FullSbs,
+                stereo_mode: Some(StereoMode::FullSbs),
             });
         }
 
         bail!("Cannot open shared texture!")
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn is_invalid(&self) -> bool {
         let address = unsafe { *(self.katanga_file_mapping.0 as *mut usize) };
         self.current_address != address
     }
+
+    // No update needed for Katanga
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn update(
+        &mut self,
+        _instance: &Instance,
+        _device: &Device,
+        _queue: &Queue,
+        _texture: &Texture2D<Bound>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 impl Drop for KatangaLoaderContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn drop(&mut self) {
         log::info!("Dropping KatangaLoaderContext");
 
@@ -217,6 +233,7 @@ enum ExternalApi {
     D3D12,
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn get_d3d11_texture_info(handle: HANDLE) -> anyhow::Result<ExternalTextureInfo> {
     let mut d3d11_device = None;
     let mut d3d11_device_context = None;
@@ -261,6 +278,7 @@ fn get_d3d11_texture_info(handle: HANDLE) -> anyhow::Result<ExternalTextureInfo>
     })
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn get_d3d12_texture_info() -> anyhow::Result<ExternalTextureInfo> {
     let mut d3d12_device: Option<ID3D12Device> = None;
     unsafe {

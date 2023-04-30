@@ -4,6 +4,8 @@ use clap::Parser;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 
+use crate::loaders::StereoMode;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ScreenParamsUniform {
@@ -15,6 +17,8 @@ pub struct ScreenParamsUniform {
     aspect_ratio: f32,
     screen_width: u32,
     ambient_width: u32,
+    stereo_x: f32,
+    stereo_y: f32,
 }
 
 #[derive(Parser, Serialize, Deserialize, Debug, Clone)]
@@ -50,11 +54,13 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn uniform(
         &self,
         aspect_ratio: f32,
         screen_width: u32,
         ambient_width: u32,
+        stereo_mode: &StereoMode,
     ) -> ScreenParamsUniform {
         ScreenParamsUniform {
             x_curvature: self.x_curvature,
@@ -74,11 +80,20 @@ impl AppConfig {
             aspect_ratio,
             screen_width,
             ambient_width,
+            stereo_x: match stereo_mode {
+                StereoMode::Sbs | StereoMode::FullSbs => 1.0,
+                _ => 0.0,
+            },
+            stereo_y: match stereo_mode {
+                StereoMode::Tab | StereoMode::FullTab => 1.0,
+                _ => 0.0,
+            },
         }
     }
 }
 
 impl Default for AppConfig {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn default() -> Self {
         Self {
             x_curvature: 0.4,
@@ -135,6 +150,7 @@ pub struct ConfigContext {
 }
 
 impl ConfigContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn try_setup() -> anyhow::Result<Option<ConfigContext>> {
         let config = AppConfig::parse();
         if let Some(config_file_path) = config.config_file {
@@ -158,6 +174,7 @@ impl ConfigContext {
         Ok(None)
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn update_config(&mut self) -> anyhow::Result<()> {
         if let Some(config_file_path) = self.config_file.clone() {
             let params = serde_json::from_reader(std::io::BufReader::new(std::fs::File::open(

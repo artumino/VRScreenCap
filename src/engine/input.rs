@@ -19,6 +19,7 @@ pub struct InputState {
 }
 
 impl InputContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn init(xr_instance: &Instance) -> anyhow::Result<InputContext> {
         let default_set =
             xr_instance.create_action_set("default", "Default controller actions", 0)?;
@@ -51,6 +52,7 @@ impl InputContext {
         })
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn attach_to_session<T>(&mut self, xr_session: &Session<T>) -> anyhow::Result<()> {
         xr_session.attach_action_sets(&[&self.default])?;
 
@@ -69,6 +71,7 @@ impl InputContext {
         Ok(())
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn process_inputs<T>(
         &mut self,
         xr_session: &Session<T>,
@@ -127,6 +130,7 @@ impl InputContext {
         Ok(())
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn compute_input_state(
         input_state: &Option<InputState>,
         right_active: bool,

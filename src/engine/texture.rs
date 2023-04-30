@@ -16,6 +16,7 @@ pub struct Texture2D<State> {
 }
 
 impl<State> Texture2D<State> {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn from_bytes(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -26,6 +27,7 @@ impl<State> Texture2D<State> {
         Ok(Self::from_image(device, queue, &img, Some(label)))
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -79,6 +81,7 @@ impl<State> Texture2D<State> {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn as_render_target_with_extent(
         &self,
         label: &str,
@@ -108,6 +111,7 @@ impl<State> Texture2D<State> {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn from_wgpu(device: &wgpu::Device, texture: wgpu::Texture) -> Texture2D<Unbound> {
         let (view, sampler) =
             Self::get_view_and_sampler(device, &texture, wgpu::FilterMode::Linear);
@@ -120,6 +124,7 @@ impl<State> Texture2D<State> {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn get_view_and_sampler(
         device: &wgpu::Device,
         texture: &wgpu::Texture,
@@ -141,6 +146,7 @@ impl<State> Texture2D<State> {
 }
 
 impl Texture2D<Unbound> {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn bind_to_context(
         self,
         wgpu_context: &WgpuContext,

@@ -20,6 +20,7 @@ impl ModelVertex {
 }
 
 impl Vertex for ModelVertex {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         use std::mem;
 
@@ -38,6 +39,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn get_buffers(
         device: &wgpu::Device,
         vertices: &[ModelVertex],
@@ -70,6 +72,7 @@ impl Mesh {
     }
 
     //TODO: Actually use entity + mesh and world matrix in shader
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn get_plane_rectangle(
         device: &wgpu::Device,
         rows: u32,
@@ -80,7 +83,7 @@ impl Mesh {
     ) -> Mesh {
         let mut vertices = vec![];
         let x_increment = 2.0 / (columns as f32);
-        let y_increment = 2.0 / (columns as f32);
+        let y_increment = 2.0 / (rows as f32);
         for row in 0..rows {
             for column in 0..columns {
                 vertices.push(ModelVertex {
@@ -90,8 +93,8 @@ impl Mesh {
                         distance,
                     ],
                     tex_coords: [
-                        (column as f32) / (columns as f32),
-                        1.0 - (row as f32) / (rows as f32),
+                        (column as f32) / ((columns - 1) as f32),
+                        1.0 - (row as f32) / ((rows - 1) as f32),
                     ],
                 });
             }
@@ -118,6 +121,7 @@ impl Mesh {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn from_asset(
         device: &wgpu::Device,
         asset: &'static [u8],

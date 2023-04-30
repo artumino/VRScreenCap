@@ -16,6 +16,8 @@ struct ScreenParams {
     aspect_ratio: f32,
     screen_width: u32,
     ambient_width: u32,
+    stereo_x: f32, // 0.0 = disabled, 1.0 = enabled
+    stereo_y: f32, // 0.0 = disabled, 1.0 = enabled
 };
 
 @group(1) @binding(0)
@@ -57,8 +59,11 @@ var t_diffuse: texture_2d<f32>;
 var s_diffuse: sampler;
 
 fn uv_to_stereo_uv(view_index: i32, uv: vec2<f32>) -> vec2<f32> {
-    let x_offset = abs(f32(view_index) - screen_params.eye_offset) / 2.0;
-    return vec2<f32>(abs(uv.x - screen_params.x_offset) / 2.0 + x_offset, abs(uv.y - screen_params.y_offset));
+    let x_divider = 2.0 - (1.0 - screen_params.stereo_x);
+    let y_divider = 2.0 - (1.0 - screen_params.stereo_y); 
+    let x_offset = (abs(f32(view_index) - screen_params.eye_offset) / 2.0) * screen_params.stereo_x;
+    let y_offset = (abs(f32(view_index) - screen_params.eye_offset) / 2.0) * screen_params.stereo_y;
+    return vec2<f32>((abs(uv.x - screen_params.x_offset) / x_divider) + x_offset, (abs(uv.y - screen_params.y_offset) / y_divider) + y_offset);
 }
 
 @fragment

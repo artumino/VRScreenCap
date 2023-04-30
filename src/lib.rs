@@ -15,8 +15,10 @@ use engine::{
     vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader,
 };
-use loaders::{katanga_loader::KatangaLoaderContext, Loader, StereoMode};
-use log::LevelFilter;
+use loaders::{
+    captrs_loader::CaptrLoader, katanga_loader::KatangaLoaderContext, Loader, StereoMode,
+};
+use log::{error, LevelFilter};
 use log4rs::{
     append::file::FileAppender,
     config::{Appender, Root},
@@ -124,6 +126,7 @@ pub fn launch() -> anyhow::Result<()> {
 }
 
 #[cfg(not(target_os = "android"))]
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn add_tray_message_sender(
     tray_state: &Arc<Mutex<TrayState>>,
     tray: &mut TrayItem,
@@ -139,6 +142,7 @@ fn add_tray_message_sender(
 }
 
 #[cfg(not(target_os = "android"))]
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn add_all_tray_message_senders(
     tray_state: &Arc<Mutex<TrayState>>,
     tray: &mut TrayItem,
@@ -151,6 +155,7 @@ fn add_all_tray_message_senders(
 }
 
 #[cfg(not(target_os = "android"))]
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn build_tray() -> anyhow::Result<(TrayItem, Arc<Mutex<TrayState>>)> {
     log::info!("Building system tray");
     let mut tray = TrayItem::new("VR Screen Cap", "tray-icon")?;
@@ -195,6 +200,7 @@ fn build_tray() -> anyhow::Result<(TrayItem, Arc<Mutex<TrayState>>)> {
     Ok((tray, tray_state))
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn try_elevate_priority() {
     log::info!("Trying to elevate process priority");
     if set_current_thread_priority(ThreadPriority::Max).is_err() {
@@ -209,6 +215,7 @@ fn try_elevate_priority() {
     }
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn run(
     xr_context: &mut OpenXRContext,
     wgpu_context: &WgpuContext,
@@ -226,8 +233,8 @@ fn run(
     // We don't need to configure the texture view much, so let's
     // let wgpu define it.
 
-    let mut aspect_ratio = 1.0;
     let mut stereo_mode = StereoMode::Mono;
+    let default_stereo_mode = StereoMode::Mono; // Not configurable for now
     let mut current_loader = None;
 
     //Load blank texture
@@ -242,6 +249,10 @@ fn run(
         #[cfg(target_os = "windows")]
         {
             Box::<KatangaLoaderContext>::default()
+        },
+        #[cfg(any(target_os = "windows", target_os = "unix"))]
+        {
+            Box::new(CaptrLoader::new(0)?)
         },
     ];
 
@@ -282,20 +293,6 @@ fn run(
         &texture_bind_group_layout,
     )?;
 
-    if let Some((texture, aspect, mode, loader)) = try_to_load_texture(&mut loaders, wgpu_context) {
-        screen_texture = texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
-        ambient_texture = get_ambient_texture(
-            &screen_texture,
-            aspect,
-            &mode,
-            wgpu_context,
-            &texture_bind_group_layout,
-        )?;
-        aspect_ratio = aspect;
-        stereo_mode = mode;
-        current_loader = Some(loader);
-    }
-
     let fullscreen_triangle_index_buffer =
         wgpu_context
             .device
@@ -327,7 +324,7 @@ fn run(
         &wgpu_context.device,
         -screen_params.distance,
         screen_params.scale,
-        aspect_ratio,
+        1.0,
         screen_params.ambient,
     );
 
@@ -336,7 +333,7 @@ fn run(
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Screen Params Buffer"),
-                contents: bytemuck::cast_slice(&[screen_params.uniform(1.0, 1, 1)]),
+                contents: bytemuck::cast_slice(&[screen_params.uniform(1.0, 1, 1, &stereo_mode)]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -618,15 +615,14 @@ fn run(
 
         let time = std::time::Instant::now();
 
-        if current_loader.is_some() || time.duration_since(last_invalidation_check).as_secs() > 10 {
-            check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated)?;
-            last_invalidation_check = time;
-        }
+        // Try to upgrade the loader to ona that has higher priority
+        if current_loader.is_none() || time.duration_since(last_invalidation_check).as_secs() > 10 {
+            
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Loader Upgrade");
 
-        if screen_invalidated {
-            if let Some((texture, aspect, mode, loader)) =
-                try_to_load_texture(&mut loaders, wgpu_context)
-            {
+            if let Some((texture, aspect, mode, loader)) = try_to_load_texture(&mut loaders, wgpu_context, current_loader) {
+                let mode = mode.unwrap_or(default_stereo_mode.clone());
                 screen_texture = texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
                 ambient_texture = get_ambient_texture(
                     &screen_texture,
@@ -635,10 +631,52 @@ fn run(
                     wgpu_context,
                     &texture_bind_group_layout,
                 )?;
-                aspect_ratio = aspect;
+                screen.change_aspect_ratio(aspect);
                 stereo_mode = mode;
+                screen_invalidated = current_loader != Some(loader);
                 current_loader = Some(loader);
-                screen.change_aspect_ratio(aspect_ratio);
+            }
+        }
+
+        // Check if the loader needs to be invalidated
+        if current_loader.is_some() || time.duration_since(last_invalidation_check).as_secs() > 10 {
+            
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Loader Invalidation Check");
+
+            check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated)?;
+            last_invalidation_check = time;
+        }
+
+        // Check if the loader has been invalidated
+        if screen_invalidated {
+            
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Loader Invalidation");
+
+            // Try to load a new texture from the same loader, or from any loader if the current one fails
+            let new_loader = 
+                current_loader
+                .map(|loader_idx| (loaders.get_mut(loader_idx), loader_idx))
+                .filter(|(loader, _)| loader.is_some())
+                .map(|(loader, loader_idx)| try_loader(loader.unwrap(), wgpu_context, loader_idx))
+                .flatten()
+                .unwrap_or(try_to_load_texture(&mut loaders, wgpu_context, None));
+
+            if let Some((texture, aspect, mode, loader)) = new_loader
+            {
+                let mode = mode.unwrap_or(default_stereo_mode.clone());
+                screen_texture = texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
+                ambient_texture = get_ambient_texture(
+                    &screen_texture,
+                    aspect,
+                    &mode,
+                    wgpu_context,
+                    &texture_bind_group_layout,
+                )?;
+                screen.change_aspect_ratio(aspect);
+                current_loader = Some(loader);
+                stereo_mode = mode;
 
                 wgpu_context.queue.write_buffer(
                     &screen_model_matrix_buffer,
@@ -658,10 +696,33 @@ fn run(
                         aspect,
                         screen_texture.texture.width() * width_multiplier,
                         ambient_texture.current().texture.width() * width_multiplier,
+                        &stereo_mode,
                     )]),
                 );
             }
             screen_invalidated = false;
+        }
+
+        // Run loader update logic
+        if let Some(current_loader) = current_loader {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Loader Update");
+
+            if let Err(error) = loaders
+                .get_mut(current_loader)
+                .map(|loader| {
+                    loader.update(
+                        &wgpu_context.instance,
+                        &wgpu_context.device,
+                        &wgpu_context.queue,
+                        &screen_texture,
+                    )
+                })
+                .unwrap_or(Err(anyhow::anyhow!("Loader not found")))
+            {
+                screen_invalidated = true;
+                error!("Loader update failed: {}", error);
+            }
         }
 
         let event = xr_context.instance.poll_event(&mut event_storage)?;
@@ -1013,64 +1074,66 @@ fn run(
                     }
                 }
 
-                #[cfg(feature = "profiling")]
-                profiling::finish_frame!();
             }
         }
 
         // Non-XR Input processing
-        match tray_state
-            .lock()
-            .ok()
-            .context("Cannot get lock on icon tray state")?
-            .message
-            .take()
         {
-            Some(TrayMessages::Quit) => {
-                log::info!("Qutting app manually...");
-                break;
-            }
-            Some(TrayMessages::Reload) => {
-                check_loader_invalidation(current_loader, &loaders, &mut screen_invalidated)?;
-            }
-            Some(TrayMessages::Recenter(horizon_locked)) => {
-                recenter_request = Some(RecenterRequest {
-                    horizon_locked: *horizon_locked,
-                    delay: 0,
-                });
-            }
-            Some(TrayMessages::ToggleSettings(setting)) => match setting {
-                ToggleSetting::SwapEyes => {
-                    screen_params.swap_eyes = !screen_params.swap_eyes;
-                    screen_invalidated = true;
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Tray update logic");
+            match tray_state
+                .lock()
+                .ok()
+                .context("Cannot get lock on icon tray state")?
+                .message
+                .take()
+            {
+                Some(TrayMessages::Quit) => {
+                    log::info!("Qutting app manually...");
+                    break;
                 }
-                ToggleSetting::FlipX => {
-                    screen_params.flip_x = !screen_params.flip_x;
-                    match stereo_mode {
-                        StereoMode::Sbs | StereoMode::FullSbs => {
-                            screen_params.swap_eyes = !screen_params.swap_eyes;
-                        }
-                        _ => {}
+                Some(TrayMessages::Reload) => {
+                    current_loader = None;
+                }
+                Some(TrayMessages::Recenter(horizon_locked)) => {
+                    recenter_request = Some(RecenterRequest {
+                        horizon_locked: *horizon_locked,
+                        delay: 0,
+                    });
+                }
+                Some(TrayMessages::ToggleSettings(setting)) => match setting {
+                    ToggleSetting::SwapEyes => {
+                        screen_params.swap_eyes = !screen_params.swap_eyes;
+                        screen_invalidated = true;
                     }
-                    screen_invalidated = true;
-                }
-                ToggleSetting::FlipY => {
-                    screen_params.flip_y = !screen_params.flip_y;
-                    match stereo_mode {
-                        StereoMode::Tab | StereoMode::FullTab => {
-                            screen_params.swap_eyes = !screen_params.swap_eyes;
+                    ToggleSetting::FlipX => {
+                        screen_params.flip_x = !screen_params.flip_x;
+                        match stereo_mode {
+                            StereoMode::Sbs | StereoMode::FullSbs => {
+                                screen_params.swap_eyes = !screen_params.swap_eyes;
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                        screen_invalidated = true;
                     }
-                    screen_invalidated = true;
-                }
-                ToggleSetting::AmbientLight => {
-                    screen_params.ambient = !screen_params.ambient;
-                    screen.change_ambient_mode(screen_params.ambient);
-                    screen_invalidated = true;
-                }
-            },
-            _ => {}
+                    ToggleSetting::FlipY => {
+                        screen_params.flip_y = !screen_params.flip_y;
+                        match stereo_mode {
+                            StereoMode::Tab | StereoMode::FullTab => {
+                                screen_params.swap_eyes = !screen_params.swap_eyes;
+                            }
+                            _ => {}
+                        }
+                        screen_invalidated = true;
+                    }
+                    ToggleSetting::AmbientLight => {
+                        screen_params.ambient = !screen_params.ambient;
+                        screen.change_ambient_mode(screen_params.ambient);
+                        screen_invalidated = true;
+                    }
+                },
+                _ => {}
+            }
         }
 
         if let Some(ConfigContext {
@@ -1078,6 +1141,9 @@ fn run(
             ..
         }) = config
         {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("File Config Watcher");
+
             if config_receiver.try_recv().is_ok() {
                 let config = config
                     .as_mut()
@@ -1095,11 +1161,15 @@ fn run(
                 }
             }
         }
+
+        #[cfg(feature = "profiling")]
+        profiling::finish_frame!();
     }
 
     Ok(())
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn get_ambient_texture(
     screen_texture: &Texture2D<Bound>,
     aspect: f32,
@@ -1143,6 +1213,7 @@ fn get_ambient_texture(
     Ok(buffer)
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn recenter_scene(
     xr_session: &openxr::Session<openxr::Vulkan>,
     xr_reference_space: &openxr::Space,
@@ -1181,6 +1252,7 @@ fn recenter_scene(
     Ok(())
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn check_loader_invalidation(
     current_loader: Option<usize>,
     loaders: &[Box<dyn loaders::Loader>],
@@ -1202,19 +1274,37 @@ fn check_loader_invalidation(
     Ok(())
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 fn try_to_load_texture(
     loaders: &mut [Box<dyn loaders::Loader>],
     wgpu_context: &WgpuContext,
-) -> Option<(Texture2D<Unbound>, f32, StereoMode, usize)> {
+    current_loader: Option<usize>,
+) -> Option<(Texture2D<Unbound>, f32, Option<StereoMode>, usize)> {
     for (loader_idx, loader) in loaders.iter_mut().enumerate() {
-        if let Ok(tex_source) = loader.load(&wgpu_context.instance, &wgpu_context.device) {
-            return Some((
-                tex_source.texture,
-                (tex_source.width as f32 / 2.0) / tex_source.height as f32,
-                tex_source.stereo_mode,
-                loader_idx,
-            ));
+        if current_loader == Some(loader_idx) {
+            break;
         }
+        if let Some(value) = try_loader(loader, wgpu_context, loader_idx) {
+            return value;
+        }
+    }
+    None
+}
+
+#[cfg_attr(feature = "profiling", profiling::function)]
+fn try_loader(loader: &mut Box<dyn Loader>, wgpu_context: &WgpuContext, loader_idx: usize) -> Option<Option<(Texture2D<Unbound>, f32, Option<StereoMode>, usize)>> {
+    if let Ok(tex_source) = loader.load(&wgpu_context.instance, &wgpu_context.device) {
+        let aspect_ratio_multiplier = tex_source
+            .stereo_mode
+            .as_ref()
+            .map(|stereo_mode| stereo_mode.aspect_ratio_multiplier())
+            .unwrap_or(1.0);
+        return Some(Some((
+            tex_source.texture,
+            (tex_source.width as f32 * aspect_ratio_multiplier) / tex_source.height as f32,
+            tex_source.stereo_mode,
+            loader_idx,
+        )));
     }
     None
 }

@@ -35,6 +35,7 @@ pub fn openxr_layers() -> [&'static str; 0] {
     []
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     #[cfg(not(target_os = "android"))]
     let entry = openxr::Entry::linked();
@@ -109,6 +110,7 @@ fn instance_flags() -> hal::InstanceFlags {
 }
 
 impl WgpuLoader for OpenXRContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn load_wgpu(&mut self) -> anyhow::Result<super::WgpuContext> {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
@@ -347,6 +349,7 @@ impl WgpuRunner for OpenXRContext {
 }
 
 impl OpenXRContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn create_swapchain(
         &self,
         xr_session: &openxr::Session<openxr::Vulkan>,

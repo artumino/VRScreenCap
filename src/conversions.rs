@@ -4,6 +4,7 @@ use wgpu_hal::api::Vulkan;
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::*;
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn vulkan_image_to_texture(
     device: &Device,
     image: vk::Image,
@@ -22,6 +23,7 @@ pub fn vulkan_image_to_texture(
 }
 
 #[cfg(target_os = "windows")]
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
     match format {
         DXGI_FORMAT_R8_UNORM => TextureFormat::R8Unorm,
@@ -89,6 +91,7 @@ pub fn unmap_texture_format(format: DXGI_FORMAT) -> TextureFormat {
     }
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn map_texture_format(format: wgpu::TextureFormat) -> vk::Format {
     use ash::vk::Format as F;
     use wgpu::TextureFormat as Tf;

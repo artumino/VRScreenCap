@@ -12,6 +12,7 @@ pub struct Screen {
 }
 
 impl Screen {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn new(
         device: &wgpu::Device,
         distance: f32,
@@ -48,12 +49,14 @@ impl Screen {
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn change_aspect_ratio(&mut self, aspect_ratio: f32) {
         self.aspect_ratio = aspect_ratio;
         self.entity.scale.y = self.scale / (2.0 * self.aspect_ratio);
         self.entity.update_matrices(&[]);
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn change_scale(&mut self, scale: f32) {
         self.scale = scale;
         self.entity.scale.x = self.scale / 2.0;
@@ -62,11 +65,13 @@ impl Screen {
         self.entity.update_matrices(&[]);
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn change_distance(&mut self, distance: f32) {
         self.entity.position.z = distance;
         self.entity.update_matrices(&[]);
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn change_ambient_mode(&mut self, ambient_mode: bool) {
         self.ambient_enabled = ambient_mode;
     }
