@@ -1,6 +1,6 @@
 [package]
 name = "vr-screen-cap"
-version = "0.4.0-dev2"
+version = "0.4.0-dev3"
 edition = "2021"
 build = "build.rs"
 authors = ["Jacopo Libe <jacopo.libe@gmail.com>"]

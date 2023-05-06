@@ -661,7 +661,14 @@ fn run(
                 .map(|loader_idx| (loaders.get_mut(loader_idx), loader_idx))
                 .filter(|(loader, _)| loader.is_some())
                 .map(|(loader, loader_idx)| try_loader(loader.unwrap(), wgpu_context, loader_idx))
-                .unwrap_or(try_to_load_texture(&mut loaders, wgpu_context, None));
+                .map(|loader| {
+                    if loader.is_some() {
+                        loader
+                    } else {
+                        try_to_load_texture(&mut loaders, wgpu_context, None)
+                    }
+                })
+                .unwrap_or_default();
 
             if let Some((texture, aspect, mode, loader)) = new_loader {
                 let mode = mode.unwrap_or(default_stereo_mode.clone());
@@ -817,6 +824,8 @@ fn run(
                             );
                         }
 
+                        xr_swapchain.release_image()?;
+
                         // Early bail
                         if let Err(err) = frame_stream.end(
                             xr_frame_state.predicted_display_time,
@@ -921,6 +930,16 @@ fn run(
                         rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
                     }
 
+                    if screen.ambient_enabled {
+                        upload_blur_uniforms(
+                            &ambient_texture,
+                            &mut jitter_frame,
+                            &mut temporal_blur_params,
+                            wgpu_context,
+                            &temporal_blur_params_buffer,
+                        );
+                    }
+
                     // Fetch the view transforms. To minimize latency, we intentionally do this
                     // *after* recording commands to render the scene, i.e. at the last possible
                     // moment before rendering begins in earnest on the GPU. Uniforms dependent on
@@ -946,16 +965,6 @@ fn run(
                         &camera_buffer,
                     )?;
 
-                    if screen.ambient_enabled {
-                        upload_blur_uniforms(
-                            &ambient_texture,
-                            &mut jitter_frame,
-                            &mut temporal_blur_params,
-                            wgpu_context,
-                            &temporal_blur_params_buffer,
-                        );
-                    }
-
                     log::trace!("Submit command buffer");
                     {
                         #[cfg(feature = "profiling")]
@@ -971,15 +980,6 @@ fn run(
                         xr_swapchain.release_image()?;
                     }
 
-                    // End rendering and submit the images
-                    let rect = openxr::Rect2Di {
-                        offset: openxr::Offset2Di { x: 0, y: 0 },
-                        extent: openxr::Extent2Di {
-                            width: resolution.width as _,
-                            height: resolution.height as _,
-                        },
-                    };
-
                     log::trace!("End frame stream");
                     {
                         #[cfg(feature = "profiling")]
@@ -990,6 +990,15 @@ fn run(
                             "End Frame",
                             format!("{predicted_display_time_nanos}").as_str()
                         );
+
+                        // End rendering and submit the images
+                        let rect = openxr::Rect2Di {
+                            offset: openxr::Offset2Di { x: 0, y: 0 },
+                            extent: openxr::Extent2Di {
+                                width: resolution.width as _,
+                                height: resolution.height as _,
+                            },
+                        };
 
                         if let Err(err) = frame_stream.end(
                             xr_frame_state.predicted_display_time,
@@ -1074,6 +1083,12 @@ fn run(
                             log::error!("Failed to recenter scene: {}", err);
                         }
                     }
+                } else {
+                    #[cfg(feature = "profiling")]
+                    profiling::scope!("Session Sleep");
+
+                    // avoid looping too fast
+                    std::thread::sleep(std::time::Duration::from_millis(11));
                 }
             }
         }
@@ -1196,8 +1211,8 @@ fn upload_blur_uniforms(
 
 #[cfg_attr(feature = "profiling", profiling::function)]
 fn upload_camera_uniforms(
-    views: &Vec<openxr::View>,
-    cameras: &mut Vec<Camera>,
+    views: &[openxr::View],
+    cameras: &mut [Camera],
     camera_uniform: &mut Vec<CameraUniform>,
     wgpu_context: &WgpuContext,
     camera_buffer: &wgpu::Buffer,

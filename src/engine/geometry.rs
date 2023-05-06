@@ -27,7 +27,7 @@ impl Vertex for ModelVertex {
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
+            attributes: Self::ATTRIBS,
         }
     }
 }
@@ -112,7 +112,7 @@ impl Mesh {
             }
         }
 
-        let (vertex_buffer, index_buffer) = Mesh::get_buffers(&device, &vertices, &indices);
+        let (vertex_buffer, index_buffer) = Mesh::get_buffers(device, &vertices, &indices);
         Mesh {
             //FIXME: Handle flipping properly
             num_indeces: indices.len() as u32,
@@ -153,11 +153,11 @@ impl Mesh {
             })
             .collect::<Vec<_>>();
         let indices = mesh.indices.clone();
-        let (vertex_buffer, index_buffer) = Mesh::get_buffers(&device, &vertices, &indices);
+        let (vertex_buffer, index_buffer) = Mesh::get_buffers(device, &vertices, &indices);
         Mesh {
             num_indeces: indices.len() as u32,
-            vertex_buffer: vertex_buffer,
-            index_buffer: index_buffer,
+            vertex_buffer,
+            index_buffer,
         }
     }
 }

@@ -95,7 +95,7 @@ impl<State> Texture2D<State> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: self.texture.dimension(),
-            format: format,
+            format,
             usage: self.texture.usage() | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         };

@@ -84,7 +84,7 @@ impl Loader for DesktopDuplicationLoader {
                 || display_mode.height != self.resolution.1;
         }
 
-        return true;
+        true
     }
 }
 
