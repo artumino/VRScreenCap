@@ -15,9 +15,7 @@ use engine::{
     vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader,
 };
-use loaders::{
-    captrs_loader::CaptrLoader, katanga_loader::KatangaLoaderContext, Loader, StereoMode,
-};
+use loaders::{Loader, StereoMode};
 use log::{error, LevelFilter};
 use log4rs::{
     append::file::FileAppender,
@@ -248,10 +246,12 @@ fn run(
     let mut loaders: Vec<Box<dyn Loader>> = vec![
         #[cfg(target_os = "windows")]
         {
+            use loaders::katanga_loader::KatangaLoaderContext;
             Box::<KatangaLoaderContext>::default()
         },
         #[cfg(any(target_os = "windows", target_os = "unix"))]
         {
+            use loaders::captrs_loader::CaptrLoader;
             Box::new(CaptrLoader::new(0)?)
         },
     ];
