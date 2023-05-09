@@ -41,6 +41,9 @@ mod conversions;
 mod engine;
 mod loaders;
 
+#[macro_use]
+mod macros;
+
 #[derive(Clone)]
 enum TrayMessages {
     Quit,

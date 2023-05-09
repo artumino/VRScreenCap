@@ -1,8 +1,16 @@
 use anyhow::{anyhow, Context};
 use wgpu::Queue;
-use win_desktop_duplication::{devices::AdapterFactory, outputs::Display, DesktopDuplicationApi};
+use win_desktop_duplication::{
+    devices::AdapterFactory, outputs::Display, texture::ColorFormat, DesktopDuplicationApi,
+};
 
-use crate::engine::texture::{Bound, Texture2D, Unbound};
+use crate::{
+    engine::{
+        formats::InternalColorFormat,
+        texture::{Bound, Texture2D, Unbound},
+    },
+    macros::auto_map,
+};
 
 use super::Loader;
 
@@ -71,7 +79,8 @@ impl Loader for DesktopDuplicationLoader {
             .acquire_next_frame_now()
             .map_err(|err| anyhow!("Error acquiring desktop duplication frame {:?}", err))?;
         let _texture_desc = texture.desc();
-        //let vk_format = unmap_texture_format(texture_desc.format);
+        //DXGI_FORMAT::from(texture_desc.format);
+        //let vk_format = unmap_texture_format();
         Ok(())
     }
 
@@ -113,3 +122,16 @@ impl DesktopDuplicationLoader {
         })
     }
 }
+
+#[cfg(target_os = "windows")]
+auto_map!(InternalColorFormat ColorFormat {
+    (InternalColorFormat::Rgba8Unorm, ColorFormat::ARGB8UNorm),
+    (InternalColorFormat::Ayuv, ColorFormat::AYUV),
+    (InternalColorFormat::R8Unorm, ColorFormat::YUV444),
+    (InternalColorFormat::R16Unorm, ColorFormat::YUV444_10bit),
+    (InternalColorFormat::Nv12, ColorFormat::NV12),
+    (InternalColorFormat::Rgba16Float, ColorFormat::ARGB16Float),
+    (InternalColorFormat::Rgb10a2Unorm, ColorFormat::ARGB10UNorm),
+    (InternalColorFormat::Y410, ColorFormat::Y410),
+    (InternalColorFormat::P010, ColorFormat::YUV420_10bit)
+});

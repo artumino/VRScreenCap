@@ -2,6 +2,7 @@ use ash::vk;
 
 pub mod camera;
 pub mod entity;
+pub mod formats;
 pub mod geometry;
 pub mod input;
 pub mod jitter;

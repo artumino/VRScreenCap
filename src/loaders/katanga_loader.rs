@@ -22,8 +22,11 @@ use windows::{
 };
 
 use crate::{
-    conversions::{map_texture_format, unmap_texture_format, vulkan_image_to_texture},
-    engine::texture::{Bound, Texture2D, Unbound},
+    conversions::vulkan_image_to_texture,
+    engine::{
+        formats::InternalColorFormat,
+        texture::{Bound, Texture2D, Unbound},
+    },
     loaders::StereoMode,
 };
 
@@ -145,10 +148,8 @@ impl D3D11Context {
         let mut texture_desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { d3d11_texture.GetDesc(&mut texture_desc) };
 
-        log::info!(
-            "Got texture from DX11 with format {:?}",
-            texture_desc.Format
-        );
+        let format: InternalColorFormat = texture_desc.Format.try_into()?;
+        log::info!("Got texture from DX11 with format {:?}", format);
 
         Ok(ExternalTextureInfo {
             external_api: ExternalApi::D3D11,
@@ -157,7 +158,7 @@ impl D3D11Context {
             array_size: texture_desc.ArraySize,
             sample_count: texture_desc.SampleDesc.Count,
             mip_levels: texture_desc.MipLevels,
-            format: unmap_texture_format(texture_desc.Format),
+            format: format.try_into()?,
             actual_handle: handle.0 as usize,
         })
     }
@@ -203,7 +204,8 @@ impl D3D12Context {
 
         let tex_info = unsafe { d3d12_texture.GetDesc() };
 
-        log::info!("Got texture from DX12 with format {:?}", tex_info.Format);
+        let format: InternalColorFormat = tex_info.Format.try_into()?;
+        log::info!("Got texture from DX12 with format {:?}", format);
 
         Ok(ExternalTextureInfo {
             external_api: ExternalApi::D3D12,
@@ -212,7 +214,7 @@ impl D3D12Context {
             array_size: tex_info.DepthOrArraySize as u32,
             sample_count: tex_info.SampleDesc.Count,
             mip_levels: tex_info.MipLevels as u32,
-            format: unmap_texture_format(tex_info.Format),
+            format: format.try_into()?,
             actual_handle: named_handle.0 as usize,
         })
     }
@@ -245,9 +247,10 @@ impl Loader for KatangaLoaderContext {
             log::info!("Actual Handle: {:?}", self.katanga_file_handle);
         }
 
-        let vk_format = map_texture_format(tex_info.format);
+        let format: InternalColorFormat = tex_info.format.try_into()?;
+        log::info!("Mapped DXGI format to {:?}", format);
 
-        log::info!("Mapped DXGI format to {:?}", tex_info.format);
+        let vk_format = format.try_into()?;
         log::info!("Mapped WGPU format to Vulkan {:?}", vk_format);
 
         let raw_image: Option<anyhow::Result<vk::Image>> = unsafe {
