@@ -21,12 +21,13 @@ impl Loader for CaptrLoader {
         &mut self,
         _instance: &wgpu::Instance,
         device: &wgpu::Device,
+        _queue: &Queue,
     ) -> anyhow::Result<super::TextureSource> {
         self.geometry = self.capturer.geometry();
         let width = self.geometry.0;
         let height = self.geometry.1;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(format!("Screen Capture Texture #{}", self.screen_index).as_str()),
+            label: Some(format!("CRS Screen Capture Texture #{}", self.screen_index).as_str()),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -96,6 +97,15 @@ impl Loader for CaptrLoader {
     fn is_invalid(&self) -> bool {
         let geometry = self.capturer.geometry();
         geometry.0 != self.geometry.0 || geometry.1 != self.geometry.1
+    }
+
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn encode_pre_pass(
+        &self,
+        _encoder: &mut wgpu::CommandEncoder,
+        _texture: &Texture2D<Bound>,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

@@ -1,15 +1,21 @@
+
+use windows::Win32::Foundation::HANDLE;
+
 use anyhow::{anyhow, Context};
-use wgpu::Queue;
+use wgpu::{Queue};
 use win_desktop_duplication::{
     devices::AdapterFactory, outputs::Display, texture::ColorFormat, DesktopDuplicationApi,
 };
+use windows::core::ComInterface;
+use windows::Win32::Graphics::Dxgi::IDXGIResource;
 
 use crate::{
     engine::{
         formats::InternalColorFormat,
-        texture::{Bound, Texture2D, Unbound},
+        texture::{Bound, Texture2D},
     },
     macros::auto_map,
+    utils::external_texture::{ExternalApi, ExternalTextureInfo},
 };
 
 use super::Loader;
@@ -18,7 +24,9 @@ pub struct DesktopDuplicationLoader {
     screen_index: usize,
     output: Display,
     capturer: DesktopDuplicationApi,
-    resolution: (u32, u32),
+    current_handle: Option<HANDLE>,
+    resolution: Option<(u32, u32)>,
+    invalid: bool,
 }
 
 impl Loader for DesktopDuplicationLoader {
@@ -27,6 +35,7 @@ impl Loader for DesktopDuplicationLoader {
         &mut self,
         _instance: &wgpu::Instance,
         device: &wgpu::Device,
+        _queue: &Queue,
     ) -> anyhow::Result<super::TextureSource> {
         let display_mode = self.output.get_current_display_mode().map_err(|err| {
             anyhow!(
@@ -36,28 +45,40 @@ impl Loader for DesktopDuplicationLoader {
             )
         })?;
 
-        self.resolution = (display_mode.width, display_mode.height);
-        let width = self.resolution.0;
-        let height = self.resolution.1;
+        let resolution = (display_mode.width, display_mode.height);
+        let width = resolution.0;
+        let height = resolution.1;
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(format!("Screen Capture Texture #{}", self.screen_index).as_str()),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            view_formats: &[],
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-        });
-        let texture = Texture2D::<Unbound>::from_wgpu(device, texture);
+        let d3d_texture = self
+            .capturer
+            .acquire_next_frame_now()
+            .map_err(|err| anyhow!("Error acquiring desktop duplication frame {:?}", err))?;
 
+        let texture_desc = d3d_texture.desc();
+        let resource: IDXGIResource = d3d_texture.as_raw_ref().cast()?;
+        let handle = unsafe { resource.GetSharedHandle() }?;
+
+        self.current_handle = Some(handle);
+
+        let external_texture_info = ExternalTextureInfo {
+            external_api: ExternalApi::D3D11,
+            width: texture_desc.width,
+            height: texture_desc.height,
+            array_size: 1u32,
+            sample_count: 1u32,
+            mip_levels: 1u32,
+            format: texture_desc.format.try_into()?,
+            actual_handle: handle.0 as usize,
+        };
+
+        let texture = external_texture_info
+            .map_as_wgpu_texture(
+                format!("DD Screen Capture Texture #{}", self.screen_index).as_str(),
+                device,
+            )
+            .context("Cannot map desktop duplication output to WGPU texture")?;
+
+        self.resolution = Some(resolution);
         Ok(super::TextureSource {
             texture,
             width,
@@ -74,13 +95,20 @@ impl Loader for DesktopDuplicationLoader {
         _queue: &Queue,
         _texture: &Texture2D<Bound>,
     ) -> anyhow::Result<()> {
-        let texture = self
+        let d3d_texture = self
             .capturer
             .acquire_next_frame_now()
             .map_err(|err| anyhow!("Error acquiring desktop duplication frame {:?}", err))?;
-        let _texture_desc = texture.desc();
-        //DXGI_FORMAT::from(texture_desc.format);
-        //let vk_format = unmap_texture_format();
+        let resource: IDXGIResource = d3d_texture.as_raw_ref().cast()?;
+        let handle = unsafe { resource.GetSharedHandle() }?;
+
+        if let Some(current_handle) = self.current_handle {
+            if current_handle == handle {
+                return Ok(());
+            }
+        }
+
+        self.invalid = true;
         Ok(())
     }
 
@@ -88,18 +116,31 @@ impl Loader for DesktopDuplicationLoader {
     fn is_invalid(&self) -> bool {
         let display_mode = self.output.get_current_display_mode();
 
+        if self.resolution.is_none() {
+            return true;
+        }
+
+        let (width, height) = self.resolution.unwrap();
         if let Ok(display_mode) = display_mode {
-            return display_mode.width != self.resolution.0
-                || display_mode.height != self.resolution.1;
+            return display_mode.width != width || display_mode.height != height || self.invalid;
         }
 
         true
+    }
+
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn encode_pre_pass(
+        &self,
+        _encoder: &mut wgpu::CommandEncoder,
+        _texture: &Texture2D<Bound>,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
 impl DesktopDuplicationLoader {
     #[cfg_attr(feature = "profiling", profiling::function)]
-    pub fn _new(screen_index: usize) -> anyhow::Result<Self> {
+    pub fn new(screen_index: usize) -> anyhow::Result<Self> {
         win_desktop_duplication::set_process_dpi_awareness();
         win_desktop_duplication::co_init();
 
@@ -112,13 +153,15 @@ impl DesktopDuplicationLoader {
         Ok(Self {
             screen_index,
             output: output.clone(),
+            current_handle: None,
             capturer: DesktopDuplicationApi::new(adapter, output).map_err(|err| {
                 anyhow!(
                     "Failed to access desktop duplication api with error {:?}",
                     err
                 )
             })?,
-            resolution: (0, 0),
+            resolution: None,
+            invalid: false,
         })
     }
 }
@@ -126,6 +169,7 @@ impl DesktopDuplicationLoader {
 #[cfg(target_os = "windows")]
 auto_map!(InternalColorFormat ColorFormat {
     (InternalColorFormat::Rgba8Unorm, ColorFormat::ARGB8UNorm),
+    (InternalColorFormat::Bgra8Unorm, ColorFormat::BGRA8UNorm), //typo in the library
     (InternalColorFormat::Ayuv, ColorFormat::AYUV),
     (InternalColorFormat::R8Unorm, ColorFormat::YUV444),
     (InternalColorFormat::R16Unorm, ColorFormat::YUV444_10bit),

@@ -1,6 +1,8 @@
-use wgpu::{Device, Instance, Queue};
+use wgpu::{CommandEncoder, Device, Instance, Queue};
 
 use crate::engine::texture::{Bound, Texture2D, Unbound};
+
+pub mod blank_loader;
 
 #[cfg(target_os = "windows")]
 pub mod katanga_loader;
@@ -8,7 +10,7 @@ pub mod katanga_loader;
 #[cfg(any(target_os = "windows"))]
 pub mod desktop_duplication_loader;
 
-#[cfg(any(target_os = "windows", target_os = "unix"))]
+#[cfg(any(target_os = "unix"))]
 pub mod captrs_loader;
 
 pub struct TextureSource {
@@ -41,12 +43,22 @@ impl StereoMode {
 }
 
 pub trait Loader {
-    fn load(&mut self, instance: &Instance, device: &Device) -> anyhow::Result<TextureSource>;
+    fn load(
+        &mut self,
+        instance: &Instance,
+        device: &Device,
+        queue: &Queue,
+    ) -> anyhow::Result<TextureSource>;
     fn update(
         &mut self,
         instance: &Instance,
         device: &Device,
         queue: &Queue,
+        texture: &Texture2D<Bound>,
+    ) -> anyhow::Result<()>;
+    fn encode_pre_pass(
+        &self,
+        encoder: &mut CommandEncoder,
         texture: &Texture2D<Bound>,
     ) -> anyhow::Result<()>;
     fn is_invalid(&self) -> bool;

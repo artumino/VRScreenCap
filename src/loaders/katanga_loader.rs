@@ -1,7 +1,6 @@
 use anyhow::{bail, Context};
-use ash::vk::{self, ImageCreateInfo};
-use wgpu::{Device, Instance, Queue, TextureFormat};
-use wgpu_hal::{api::Vulkan, MemoryFlags, TextureDescriptor, TextureUses};
+use ash::vk;
+use wgpu::{Device, Instance, Queue};
 use windows::{
     core::{s, w, PCWSTR},
     Win32::{
@@ -22,12 +21,12 @@ use windows::{
 };
 
 use crate::{
-    conversions::vulkan_image_to_texture,
     engine::{
         formats::InternalColorFormat,
-        texture::{Bound, Texture2D, Unbound},
+        texture::{Bound, Texture2D},
     },
     loaders::StereoMode,
+    utils::external_texture::{ExternalApi, ExternalTextureInfo},
 };
 
 use super::{Loader, TextureSource};
@@ -158,7 +157,7 @@ impl D3D11Context {
             array_size: texture_desc.ArraySize,
             sample_count: texture_desc.SampleDesc.Count,
             mip_levels: texture_desc.MipLevels,
-            format: format.try_into()?,
+            format,
             actual_handle: handle.0 as usize,
         })
     }
@@ -214,7 +213,7 @@ impl D3D12Context {
             array_size: tex_info.DepthOrArraySize as u32,
             sample_count: tex_info.SampleDesc.Count,
             mip_levels: tex_info.MipLevels as u32,
-            format: format.try_into()?,
+            format,
             actual_handle: named_handle.0 as usize,
         })
     }
@@ -222,7 +221,12 @@ impl D3D12Context {
 
 impl Loader for KatangaLoaderContext {
     #[cfg_attr(feature = "profiling", profiling::function)]
-    fn load(&mut self, _instance: &Instance, device: &Device) -> anyhow::Result<TextureSource> {
+    fn load(
+        &mut self,
+        _instance: &Instance,
+        device: &Device,
+        _queue: &Queue,
+    ) -> anyhow::Result<TextureSource> {
         self.map_katanga_file()?;
 
         let address = unsafe { *(self.katanga_file_mapping.0 as *mut usize) };
@@ -242,112 +246,18 @@ impl Loader for KatangaLoaderContext {
                     .unwrap_or(Err(anyhow::anyhow!("No D3D11 device found")))
             })?;
 
-        let tex_handle = tex_info.actual_handle as vk::HANDLE;
         if tex_info.actual_handle != self.current_address {
             log::info!("Actual Handle: {:?}", self.katanga_file_handle);
         }
 
-        let format: InternalColorFormat = tex_info.format.try_into()?;
-        log::info!("Mapped DXGI format to {:?}", format);
+        let internal_texture = tex_info.map_as_wgpu_texture("KatangaStream", device)?;
 
-        let vk_format = format.try_into()?;
-        log::info!("Mapped WGPU format to Vulkan {:?}", vk_format);
-
-        let raw_image: Option<anyhow::Result<vk::Image>> = unsafe {
-            device.as_hal::<Vulkan, _, _>(|device| {
-                device.map(|device| {
-                    let raw_device = device.raw_device();
-                    //let raw_phys_device = device.raw_physical_device();
-                    let handle_type = match tex_info.external_api {
-                        ExternalApi::D3D11 => {
-                            vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE_KMT_KHR
-                        }
-                        ExternalApi::D3D12 => vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE_KHR,
-                    };
-
-                    let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
-                        .handle_type(handle_type)
-                        .handle(tex_handle);
-
-                    let allocate_info = vk::MemoryAllocateInfo::builder()
-                        .push_next(&mut import_memory_info)
-                        .memory_type_index(0);
-
-                    let allocated_memory = raw_device.allocate_memory(&allocate_info, None)?;
-
-                    let mut ext_create_info =
-                        vk::ExternalMemoryImageCreateInfo::builder().handle_types(handle_type);
-
-                    let image_create_info = ImageCreateInfo::builder()
-                        .push_next(&mut ext_create_info)
-                        //.push_next(&mut dedicated_creation_info)
-                        .image_type(vk::ImageType::TYPE_2D)
-                        .format(vk_format)
-                        .extent(vk::Extent3D {
-                            width: tex_info.width,
-                            height: tex_info.height,
-                            depth: tex_info.array_size,
-                        })
-                        .mip_levels(tex_info.mip_levels)
-                        .array_layers(tex_info.array_size)
-                        .samples(vk::SampleCountFlags::TYPE_1)
-                        .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::SAMPLED)
-                        .sharing_mode(vk::SharingMode::CONCURRENT);
-
-                    let raw_image = raw_device.create_image(&image_create_info, None)?;
-
-                    raw_device.bind_image_memory(raw_image, allocated_memory, 0)?;
-
-                    Ok(raw_image)
-                })
-            })
-        };
-
-        if let Some(Ok(raw_image)) = raw_image {
-            let texture = vulkan_image_to_texture(
-                device,
-                raw_image,
-                wgpu::TextureDescriptor {
-                    label: "KatangaStream".into(),
-                    size: wgpu::Extent3d {
-                        width: tex_info.width,
-                        height: tex_info.height,
-                        depth_or_array_layers: tex_info.array_size,
-                    },
-                    mip_level_count: tex_info.mip_levels,
-                    sample_count: tex_info.sample_count,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: tex_info.format,
-                    view_formats: &[],
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
-                },
-                TextureDescriptor {
-                    label: "KatangaStream".into(),
-                    size: wgpu::Extent3d {
-                        width: tex_info.width,
-                        height: tex_info.height,
-                        depth_or_array_layers: tex_info.array_size,
-                    },
-                    mip_level_count: tex_info.mip_levels,
-                    sample_count: tex_info.sample_count,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: tex_info.format,
-                    view_formats: vec![],
-                    usage: TextureUses::RESOURCE | TextureUses::COPY_SRC,
-                    memory_flags: MemoryFlags::empty(),
-                },
-            );
-
-            return Ok(TextureSource {
-                texture: Texture2D::<Unbound>::from_wgpu(device, texture),
-                width: tex_info.width,
-                height: tex_info.height,
-                stereo_mode: Some(StereoMode::FullSbs),
-            });
-        }
-
-        bail!("Cannot open shared texture!")
+        Ok(TextureSource {
+            texture: internal_texture,
+            width: tex_info.width,
+            height: tex_info.height,
+            stereo_mode: Some(StereoMode::FullSbs),
+        })
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]
@@ -373,6 +283,15 @@ impl Loader for KatangaLoaderContext {
         self.map_katanga_file()?;
         Ok(())
     }
+
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn encode_pre_pass(
+        &self,
+        _encoder: &mut wgpu::CommandEncoder,
+        _texture: &Texture2D<Bound>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 impl Drop for KatangaLoaderContext {
@@ -381,20 +300,4 @@ impl Drop for KatangaLoaderContext {
         log::info!("Dropping KatangaLoaderContext");
         self.unmap();
     }
-}
-
-struct ExternalTextureInfo {
-    external_api: ExternalApi,
-    width: u32,
-    height: u32,
-    array_size: u32,
-    sample_count: u32,
-    mip_levels: u32,
-    format: TextureFormat,
-    actual_handle: usize,
-}
-
-enum ExternalApi {
-    D3D11,
-    D3D12,
 }

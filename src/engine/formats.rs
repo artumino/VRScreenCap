@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub enum InternalColorFormat {
     R8Unorm,
     R8Snorm,
@@ -22,12 +22,14 @@ pub enum InternalColorFormat {
     Rg16Snorm,
     Rg16Float,
     Rgba8Unorm,
+    #[default]
     Rgba8UnormSrgb,
     Rgba8Snorm,
     Rgba8Uint,
     Rgba8Sint,
     Bgra8Unorm,
     Bgra8UnormSrgb,
+    Abgr8Unorm,
     Rgb9e5Ufloat,
     Rgb10a2Unorm,
     Rg11b10Float,
@@ -76,10 +78,4 @@ pub enum InternalColorFormat {
     Nv12,
     Y410,
     P010,
-}
-
-impl Default for InternalColorFormat {
-    fn default() -> Self {
-        InternalColorFormat::Rgba8UnormSrgb
-    }
 }

@@ -3,8 +3,7 @@ use wgpu::{Device, TextureDescriptor, TextureFormat};
 use wgpu_hal::api::Vulkan;
 use windows::Win32::Graphics::Dxgi::Common::*;
 
-use crate::{macros::auto_map, engine::formats::InternalColorFormat};
-
+use crate::{engine::formats::InternalColorFormat, macros::auto_map};
 
 #[cfg(target_os = "windows")]
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -162,7 +161,8 @@ auto_map!(InternalColorFormat Format {
     (InternalColorFormat::EacR11Snorm, ash::vk::Format::EAC_R11_SNORM_BLOCK),
     (InternalColorFormat::EacRg11Unorm, ash::vk::Format::EAC_R11G11_UNORM_BLOCK),
     (InternalColorFormat::EacRg11Snorm, ash::vk::Format::EAC_R11G11_SNORM_BLOCK),
-    (InternalColorFormat::Stencil8, ash::vk::Format::S8_UINT)
+    (InternalColorFormat::Stencil8, ash::vk::Format::S8_UINT),
+    (InternalColorFormat::Abgr8Unorm, ash::vk::Format::A8B8G8R8_UNORM_PACK32)
 });
 
 #[cfg(target_os = "windows")]
@@ -237,7 +237,7 @@ auto_map!(DXGI_FORMAT InternalColorFormat {
 #[cfg(test)]
 mod test {
     use wgpu::TextureFormat;
-    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT};
+    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_R8G8B8A8_UNORM};
 
     use crate::engine::formats::InternalColorFormat;
 
@@ -248,10 +248,10 @@ mod test {
 
         let mapped_dxgi: DXGI_FORMAT = internal_format.try_into()?;
         let mapped_internal: InternalColorFormat = dxgi_equivalent.try_into()?;
-        
+
         assert_eq!(mapped_dxgi, dxgi_equivalent);
         assert_eq!(mapped_internal, internal_format);
-        
+
         let error: Result<TextureFormat, _> = InternalColorFormat::Y410.try_into();
         assert!(error.is_err());
 

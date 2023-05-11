@@ -15,11 +15,19 @@ use engine::{
     vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader,
 };
-use loaders::{Loader, StereoMode};
+use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
 use log::{error, LevelFilter};
 use log4rs::{
-    append::file::FileAppender,
-    config::{Appender, Root},
+    append::{
+        console::ConsoleAppender,
+        rolling_file::{
+            policy::compound::{
+                roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger, CompoundPolicy,
+            },
+            RollingFileAppender,
+        },
+    },
+    config::{Appender, Logger, Root},
     encode::pattern::PatternEncoder,
     Config,
 };
@@ -40,6 +48,7 @@ mod config;
 mod conversions;
 mod engine;
 mod loaders;
+mod utils;
 
 #[macro_use]
 mod macros;
@@ -91,13 +100,58 @@ pub fn launch() -> anyhow::Result<()> {
 
     #[cfg(not(target_os = "android"))]
     {
-        let logfile = FileAppender::builder()
-            .encoder(Box::new(PatternEncoder::new("{l} - {m}\n")))
-            .build("output.log")?;
+        let trigger_size = 30_000_000_u64;
+        let trigger = Box::new(SizeTrigger::new(trigger_size));
+
+        let roller_pattern = "logs/output_{}.log";
+        let roller_count = 5;
+        let roller_base = 1;
+        let roller = Box::new(
+            FixedWindowRoller::builder()
+                .base(roller_base)
+                .build(roller_pattern, roller_count)
+                .unwrap(),
+        );
+
+        let compound_policy = Box::new(CompoundPolicy::new(trigger, roller));
+
+        let logfile = RollingFileAppender::builder()
+            .encoder(Box::new(PatternEncoder::new(
+                "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}",
+            )))
+            .build("logs/output.log", compound_policy)?;
+
+        let stdout = ConsoleAppender::builder().build();
 
         let config = Config::builder()
             .appender(Appender::builder().build("logfile", Box::new(logfile)))
-            .build(Root::builder().appender("logfile").build(LevelFilter::Info))?;
+            .appender(Appender::builder().build("stdout", Box::new(stdout)))
+            .logger(
+                Logger::builder()
+                    .appender("logfile")
+                    .build("panic", LevelFilter::Info),
+            )
+            .logger(
+                Logger::builder()
+                    .appender("logfile")
+                    .build("vr-screen-cap", LevelFilter::Info),
+            )
+            .logger(
+                Logger::builder()
+                    .appender("logfile")
+                    .build("vr_screen_cap_core", LevelFilter::Info),
+            )
+            .logger(
+                Logger::builder()
+                    .appender("logfile")
+                    .build("wgpu", LevelFilter::Warn),
+            )
+            .logger(
+                Logger::builder()
+                    .appender("logfile")
+                    .build("wgpu-hal", LevelFilter::Warn),
+            )
+            .build(Root::builder().appender("stdout").build(LevelFilter::Info))?;
 
         log4rs::init_config(config)?;
         log_panics::init();
@@ -238,25 +292,23 @@ fn run(
     let default_stereo_mode = StereoMode::Mono; // Not configurable for now
     let mut current_loader = None;
 
-    //Load blank texture
-    let blank_texture = Texture2D::<Unbound>::from_bytes(
-        &wgpu_context.device,
-        &wgpu_context.queue,
-        include_bytes!("../assets/blank_grey.png"),
-        "Blank",
-    )?;
-
     let mut loaders: Vec<Box<dyn Loader>> = vec![
         #[cfg(target_os = "windows")]
         {
             use loaders::katanga_loader::KatangaLoaderContext;
             Box::<KatangaLoaderContext>::default()
         },
-        #[cfg(any(target_os = "windows", target_os = "unix"))]
+        #[cfg(target_os = "windows")]
+        {
+            use loaders::desktop_duplication_loader::DesktopDuplicationLoader;
+            Box::new(DesktopDuplicationLoader::new(0)?)
+        },
+        #[cfg(any(target_os = "unix"))]
         {
             use loaders::captrs_loader::CaptrLoader;
             Box::new(CaptrLoader::new(0)?)
         },
+        Box::<BlankLoader>::default(),
     ];
 
     let texture_bind_group_layout =
@@ -286,8 +338,17 @@ fn run(
                 label: Some("texture_bind_group_layout"),
             });
 
-    let mut screen_texture =
-        blank_texture.bind_to_context(wgpu_context, &texture_bind_group_layout);
+    let mut screen_texture = loaders
+        .last_mut()
+        .unwrap()
+        .load(
+            &wgpu_context.instance,
+            &wgpu_context.device,
+            &wgpu_context.queue,
+        )?
+        .texture
+        .bind_to_context(wgpu_context, &texture_bind_group_layout);
+
     let mut ambient_texture = get_ambient_texture(
         &screen_texture,
         1.0,
@@ -852,6 +913,11 @@ fn run(
                             label: Some("Render Encorder"),
                         },
                     );
+
+                    if let Some(loader) = current_loader.and_then(|index| loaders.get(index)) {
+                        loader.encode_pre_pass(&mut encoder, &screen_texture)?;
+                    }
+
                     if screen.ambient_enabled {
                         #[cfg(feature = "profiling")]
                         profiling::scope!("Encode Ambient Pass");
@@ -1377,7 +1443,11 @@ fn try_loader(
     wgpu_context: &WgpuContext,
     loader_idx: usize,
 ) -> Option<(Texture2D<Unbound>, f32, Option<StereoMode>, usize)> {
-    if let Ok(tex_source) = loader.load(&wgpu_context.instance, &wgpu_context.device) {
+    if let Ok(tex_source) = loader.load(
+        &wgpu_context.instance,
+        &wgpu_context.device,
+        &wgpu_context.queue,
+    ) {
         let aspect_ratio_multiplier = tex_source
             .stereo_mode
             .as_ref()
