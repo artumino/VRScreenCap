@@ -108,7 +108,7 @@ fn weighted9_sample(vstep: f32, hstep: f32,
 }
 
 @fragment
-fn vignette_fs_main(in: VertexOutput, @builtin(view_index) view_index: i32) -> @location(0) vec4<f32> {
+fn vignette_fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let clamped_text_coords = clamp(in.tex_coords, vec2<f32>(0.0), vec2<f32>(1.0)) - vec2<f32>(0.5);
     let dist = length(clamped_text_coords);
     let vig = 1.0 - smoothstep(0.35, 0.5, dist);
@@ -121,5 +121,6 @@ fn vignette_fs_main(in: VertexOutput, @builtin(view_index) view_index: i32) -> @
         0.1111111111111111, 0.1111111111111111, 0.1111111111111111,
         0.1111111111111111, 0.1111111111111111, 0.1111111111111111,
         0.1111111111111111, 0.1111111111111111, 0.1111111111111111,
-        t_diffuse, s_diffuse, uv_to_stereo_uv(view_index, in.tex_coords)).rgb * vig, 1.0);
+        t_diffuse, s_diffuse, uv_to_stereo_uv(0, in.tex_coords)).rgb * vig, 1.0);
+                            // ^ forced mono to left eye
 }
