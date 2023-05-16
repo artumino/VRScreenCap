@@ -131,3 +131,6 @@ keystore_password = "test1234"
 [package.metadata.android.signing.release]
 path = "keys/artum-dev.keystore"
 keystore_password = "test1234"
+
+[profile.release]
+lto = true

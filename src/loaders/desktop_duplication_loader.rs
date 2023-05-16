@@ -1,8 +1,7 @@
-
 use windows::Win32::Foundation::HANDLE;
 
 use anyhow::{anyhow, Context};
-use wgpu::{Queue};
+use wgpu::Queue;
 use win_desktop_duplication::{
     devices::AdapterFactory, outputs::Display, texture::ColorFormat, DesktopDuplicationApi,
 };
