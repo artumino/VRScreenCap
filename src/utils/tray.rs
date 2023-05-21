@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use tray_item::TrayItem;
+use tray_item::{IconSource, TrayItem};
 
 use crate::utils::commands::ToggleSetting;
 
@@ -36,7 +36,7 @@ fn add_all_tray_message_senders(
 #[cfg_attr(feature = "profiling", profiling::function)]
 pub(crate) fn build_tray(tray_state: &Arc<Mutex<AppState>>) -> anyhow::Result<TrayItem> {
     log::info!("Building system tray");
-    let mut tray = TrayItem::new("VR Screen Cap", "tray-icon")?;
+    let mut tray = TrayItem::new("VR Screen Cap", IconSource::Resource("tray-icon"))?;
 
     tray.add_label("Settings")?;
     add_all_tray_message_senders(
