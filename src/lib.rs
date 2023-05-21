@@ -16,21 +16,9 @@ use engine::{
     WgpuContext, WgpuLoader,
 };
 use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
-use log::{error, LevelFilter};
-use log4rs::{
-    append::{
-        console::ConsoleAppender,
-        rolling_file::{
-            policy::compound::{
-                roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger, CompoundPolicy,
-            },
-            RollingFileAppender,
-        },
-    },
-    config::{Appender, Logger, Root},
-    encode::pattern::PatternEncoder,
-    Config,
-};
+use log::error;
+use utils::commands::AppState;
+
 use openxr::ReferenceSpaceType;
 use std::{
     iter,
@@ -38,11 +26,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 use thread_priority::*;
-#[cfg(not(target_os = "android"))]
-use tray_item::TrayItem;
 use wgpu::{util::DeviceExt, BindGroupLayout};
 
-use crate::config::ConfigContext;
+use crate::{
+    config::ConfigContext,
+    utils::commands::{AppCommands, AppContext, RecenterRequest, ToggleSetting},
+};
 
 mod config;
 mod conversions;
@@ -52,31 +41,6 @@ mod utils;
 
 #[macro_use]
 mod macros;
-
-#[derive(Clone)]
-enum TrayMessages {
-    Quit,
-    Reload,
-    Recenter(bool),
-    ToggleSettings(ToggleSetting),
-}
-
-#[derive(Clone)]
-enum ToggleSetting {
-    FlipX,
-    FlipY,
-    SwapEyes,
-    AmbientLight,
-}
-
-struct TrayState {
-    pub message: Option<&'static TrayMessages>,
-}
-
-struct RecenterRequest {
-    pub delay: i64,
-    pub horizon_locked: bool,
-}
 
 const AMBIENT_BLUR_BASE_RES: u32 = 16;
 const AMBIENT_BLUR_TEMPORAL_SAMPLES: u32 = 16;
@@ -99,73 +63,13 @@ pub fn launch() -> anyhow::Result<()> {
         renderdoc::RenderDoc::new().context("Unable to connect to renderdoc")?;
 
     #[cfg(not(target_os = "android"))]
-    {
-        let trigger_size = 30_000_000_u64;
-        let trigger = Box::new(SizeTrigger::new(trigger_size));
-
-        let roller_pattern = "logs/output_{}.log";
-        let roller_count = 5;
-        let roller_base = 1;
-        let roller = Box::new(
-            FixedWindowRoller::builder()
-                .base(roller_base)
-                .build(roller_pattern, roller_count)
-                .unwrap(),
-        );
-
-        let compound_policy = Box::new(CompoundPolicy::new(trigger, roller));
-
-        let logfile = RollingFileAppender::builder()
-            .encoder(Box::new(PatternEncoder::new(
-                "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}",
-            )))
-            .build("logs/output.log", compound_policy)?;
-
-        let stdout = ConsoleAppender::builder().build();
-
-        let config = Config::builder()
-            .appender(Appender::builder().build("logfile", Box::new(logfile)))
-            .appender(Appender::builder().build("stdout", Box::new(stdout)))
-            .logger(
-                Logger::builder()
-                    .appender("logfile")
-                    .build("panic", LevelFilter::Info),
-            )
-            .logger(
-                Logger::builder()
-                    .appender("logfile")
-                    .build("vr-screen-cap", LevelFilter::Info),
-            )
-            .logger(
-                Logger::builder()
-                    .appender("logfile")
-                    .build("vr_screen_cap_core", LevelFilter::Info),
-            )
-            .logger(
-                Logger::builder()
-                    .appender("logfile")
-                    .build("wgpu", LevelFilter::Warn),
-            )
-            .logger(
-                Logger::builder()
-                    .appender("logfile")
-                    .build("wgpu-hal", LevelFilter::Warn),
-            )
-            .build(Root::builder().appender("stdout").build(LevelFilter::Info))?;
-
-        log4rs::init_config(config)?;
-        log_panics::init();
-    }
+    utils::logging::setup_logging()?;
 
     try_elevate_priority();
 
+    let app = AppContext::new()?;
     let mut xr_context = enable_xr_runtime()?;
     let wgpu_context = xr_context.load_wgpu()?;
-
-    #[cfg(not(target_os = "android"))]
-    let (_tray, tray_state) = build_tray()?;
-    #[cfg(target_os = "android")]
-    let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
 
     let mut config_context = config::ConfigContext::try_setup().unwrap_or(None);
 
@@ -173,86 +77,11 @@ pub fn launch() -> anyhow::Result<()> {
     run(
         &mut xr_context,
         &wgpu_context,
-        &tray_state,
+        &app.state,
         &mut config_context,
     )?;
 
     Ok(())
-}
-
-#[cfg(not(target_os = "android"))]
-#[cfg_attr(feature = "profiling", profiling::function)]
-fn add_tray_message_sender(
-    tray_state: &Arc<Mutex<TrayState>>,
-    tray: &mut TrayItem,
-    entry_name: &'static str,
-    message: &'static TrayMessages,
-) -> anyhow::Result<()> {
-    let cloned_state = tray_state.clone();
-    Ok(tray.add_menu_item(entry_name, move || {
-        if let Ok(mut locked_state) = cloned_state.lock() {
-            locked_state.message = Some(message);
-        }
-    })?)
-}
-
-#[cfg(not(target_os = "android"))]
-#[cfg_attr(feature = "profiling", profiling::function)]
-fn add_all_tray_message_senders(
-    tray_state: &Arc<Mutex<TrayState>>,
-    tray: &mut TrayItem,
-    entries: Vec<(&'static str, &'static TrayMessages)>,
-) -> anyhow::Result<()> {
-    for (entry_name, message) in entries {
-        add_tray_message_sender(tray_state, tray, entry_name, message)?;
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "android"))]
-#[cfg_attr(feature = "profiling", profiling::function)]
-fn build_tray() -> anyhow::Result<(TrayItem, Arc<Mutex<TrayState>>)> {
-    log::info!("Building system tray");
-    let mut tray = TrayItem::new("VR Screen Cap", "tray-icon")?;
-    let tray_state = Arc::new(Mutex::new(TrayState { message: None }));
-
-    tray.add_label("Settings")?;
-    add_all_tray_message_senders(
-        &tray_state,
-        &mut tray,
-        vec![
-            (
-                "Swap Eyes",
-                &TrayMessages::ToggleSettings(ToggleSetting::SwapEyes),
-            ),
-            (
-                "Flip X",
-                &TrayMessages::ToggleSettings(ToggleSetting::FlipX),
-            ),
-            (
-                "Flip Y",
-                &TrayMessages::ToggleSettings(ToggleSetting::FlipY),
-            ),
-            (
-                "Toggle Ambient Light",
-                &TrayMessages::ToggleSettings(ToggleSetting::AmbientLight),
-            ),
-        ],
-    )?;
-
-    tray.add_label("Actions")?;
-    add_all_tray_message_senders(
-        &tray_state,
-        &mut tray,
-        vec![
-            ("Reload Screen", &TrayMessages::Reload),
-            ("Recenter", &TrayMessages::Recenter(true)),
-            ("Recenter w/ Pitch", &TrayMessages::Recenter(false)),
-            ("Quit", &TrayMessages::Quit),
-        ],
-    )?;
-
-    Ok((tray, tray_state))
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -274,7 +103,7 @@ fn try_elevate_priority() {
 fn run(
     xr_context: &mut OpenXRContext,
     wgpu_context: &WgpuContext,
-    tray_state: &Arc<Mutex<TrayState>>,
+    app_state: &Arc<Mutex<AppState>>,
     config: &mut Option<ConfigContext>,
 ) -> anyhow::Result<()> {
     // Load the shaders from disk
@@ -1165,28 +994,28 @@ fn run(
         // Non-XR Input processing
         {
             #[cfg(feature = "profiling")]
-            profiling::scope!("Tray update logic");
-            match tray_state
+            profiling::scope!("Interface input update logic");
+            match app_state
                 .lock()
                 .ok()
-                .context("Cannot get lock on icon tray state")?
+                .context("Cannot get lock on app state")?
                 .message
                 .take()
             {
-                Some(TrayMessages::Quit) => {
+                Some(AppCommands::Quit) => {
                     log::info!("Qutting app manually...");
                     break;
                 }
-                Some(TrayMessages::Reload) => {
+                Some(AppCommands::Reload) => {
                     current_loader = None;
                 }
-                Some(TrayMessages::Recenter(horizon_locked)) => {
+                Some(AppCommands::Recenter(horizon_locked)) => {
                     recenter_request = Some(RecenterRequest {
                         horizon_locked: *horizon_locked,
                         delay: 0,
                     });
                 }
-                Some(TrayMessages::ToggleSettings(setting)) => match setting {
+                Some(AppCommands::ToggleSettings(setting)) => match setting {
                     ToggleSetting::SwapEyes => {
                         screen_params.swap_eyes = !screen_params.swap_eyes;
                         screen_invalidated = true;

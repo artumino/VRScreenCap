@@ -5,8 +5,6 @@ use openxr as xr;
 use wgpu::{Device, Extent3d};
 use wgpu_hal as hal;
 
-
-
 use super::{
     formats::InternalColorFormat,
     texture::{Texture2D, Unbound},
