@@ -371,7 +371,7 @@ impl OpenXRContext {
             width: views[0].recommended_image_rect_width,
             height: views[0].recommended_image_rect_height,
         };
-        let vk_format: vk::Format = SWAPCHAIN_COLOR_FORMAT.try_into()?;
+        let vk_format: vk::Format = vk::Format::B8G8R8A8_SRGB;
         let xr_swapchain = xr_session.create_swapchain(&openxr::SwapchainCreateInfo {
             create_flags: openxr::SwapchainCreateFlags::EMPTY,
             usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
