@@ -1,8 +1,12 @@
 use anyhow::*;
+use ash::vk;
 use image::GenericImageView;
-use wgpu::TextureDescriptor;
+use wgpu::{Extent3d, TextureDescriptor};
+use wgpu_hal::MemoryFlags;
 
-use super::WgpuContext;
+use crate::conversions::vulkan_image_to_texture;
+
+use super::{formats::InternalColorFormat, WgpuContext};
 
 pub struct Bound;
 pub struct Unbound;
@@ -122,6 +126,45 @@ impl<State> Texture2D<State> {
             bind_group: None,
             state: std::marker::PhantomData,
         }
+    }
+
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    pub fn from_vk_image(
+        label: &str,
+        device: &wgpu::Device,
+        image: vk::Image,
+        size: Extent3d,
+        format: InternalColorFormat,
+    ) -> anyhow::Result<Texture2D<Unbound>> {
+        let wgpu_tex_desc = wgpu::TextureDescriptor {
+            label: Some(label),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: format.try_into()?,
+            view_formats: &[],
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+        };
+
+        let wgpu_hal_tex_desc = wgpu_hal::TextureDescriptor {
+            label: wgpu_tex_desc.label,
+            size: wgpu_tex_desc.size,
+            mip_level_count: wgpu_tex_desc.mip_level_count,
+            sample_count: wgpu_tex_desc.sample_count,
+            dimension: wgpu_tex_desc.dimension,
+            format: wgpu_tex_desc.format,
+            view_formats: vec![],
+            usage: wgpu_hal::TextureUses::COLOR_TARGET | wgpu_hal::TextureUses::COPY_DST,
+            memory_flags: MemoryFlags::empty(),
+        };
+
+        // Create a WGPU image view for this image
+        let wgpu_texture = vulkan_image_to_texture(device, image, wgpu_tex_desc, wgpu_hal_tex_desc);
+
+        Ok(Self::from_wgpu(device, wgpu_texture))
     }
 
     #[cfg_attr(feature = "profiling", profiling::function)]

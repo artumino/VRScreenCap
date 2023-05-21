@@ -560,7 +560,7 @@ fn run(
                     module: &screen_shader,
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT,
+                        format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -586,7 +586,7 @@ fn run(
                     module: &screen_shader,
                     entry_point: "vignette_fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT,
+                        format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -613,12 +613,12 @@ fn run(
                     entry_point: "temporal_fs_main",
                     targets: &[
                         Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT,
+                            format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
                             blend: Some(wgpu::BlendState::REPLACE),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
                         Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT,
+                            format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
                             blend: Some(wgpu::BlendState::REPLACE),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
@@ -1330,7 +1330,7 @@ fn get_ambient_texture(
         StereoMode::FullSbs => 2,
         _ => 1,
     };
-
+    let wpu_format = SWAPCHAIN_COLOR_FORMAT.try_into()?;
     let buffer = RoundRobinTextureBuffer::new(
         (0..3)
             .map(|idx| {
@@ -1343,7 +1343,7 @@ fn get_ambient_texture(
                                 * height_multiplier,
                             depth_or_array_layers: screen_texture.texture.depth_or_array_layers(),
                         },
-                        SWAPCHAIN_COLOR_FORMAT,
+                        wpu_format,
                         &wgpu_context.device,
                     )
                     .bind_to_context(wgpu_context, bind_group_layout)

@@ -1,13 +1,14 @@
 use anyhow::{bail, Context};
 use ash::vk::{self, Handle, QueueGlobalPriorityKHR};
-use hal::MemoryFlags;
+
 use openxr as xr;
 use wgpu::{Device, Extent3d};
 use wgpu_hal as hal;
 
-use crate::conversions::vulkan_image_to_texture;
+
 
 use super::{
+    formats::InternalColorFormat,
     texture::{Texture2D, Unbound},
     WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION,
 };
@@ -22,8 +23,7 @@ pub struct OpenXRContext {
 
 pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 pub const VIEW_COUNT: u32 = 2;
-pub const SWAPCHAIN_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
-pub const VK_SWAPCHAIN_COLOR_FORMAT: vk::Format = vk::Format::B8G8R8A8_SRGB;
+pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8Unorm;
 
 #[cfg(debug_assertions)]
 pub fn openxr_layers() -> [&'static str; 0] {
@@ -373,11 +373,12 @@ impl OpenXRContext {
             width: views[0].recommended_image_rect_width,
             height: views[0].recommended_image_rect_height,
         };
+        let vk_format: vk::Format = SWAPCHAIN_COLOR_FORMAT.try_into()?;
         let xr_swapchain = xr_session.create_swapchain(&openxr::SwapchainCreateInfo {
             create_flags: openxr::SwapchainCreateFlags::EMPTY,
             usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
                 | openxr::SwapchainUsageFlags::SAMPLED,
-            format: VK_SWAPCHAIN_COLOR_FORMAT.as_raw() as _,
+            format: vk_format.as_raw() as _,
             sample_count: 1,
             width: resolution.width,
             height: resolution.height,
@@ -390,48 +391,26 @@ impl OpenXRContext {
         let swapcain_textures: Vec<_> = xr_swapchain
             .enumerate_images()?
             .into_iter()
-            .map(|image| {
-                let wgpu_tex_desc = wgpu::TextureDescriptor {
-                    label: Some("Swapchain Target"),
-                    size: Extent3d {
+            .map(vk::Image::from_raw)
+            .filter_map(|image| {
+                Texture2D::<Unbound>::from_vk_image(
+                    "OpenXR swapchain image",
+                    device,
+                    image,
+                    Extent3d {
                         width: resolution.width,
                         height: resolution.height,
                         depth_or_array_layers: VIEW_COUNT,
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: SWAPCHAIN_COLOR_FORMAT,
-                    view_formats: &[],
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                };
-
-                let wgpu_hal_tex_desc = wgpu_hal::TextureDescriptor {
-                    label: wgpu_tex_desc.label,
-                    size: wgpu_tex_desc.size,
-                    mip_level_count: wgpu_tex_desc.mip_level_count,
-                    sample_count: wgpu_tex_desc.sample_count,
-                    dimension: wgpu_tex_desc.dimension,
-                    format: wgpu_tex_desc.format,
-                    view_formats: vec![],
-                    usage: wgpu_hal::TextureUses::COLOR_TARGET | wgpu_hal::TextureUses::COPY_DST,
-                    memory_flags: MemoryFlags::empty(),
-                };
-
-                // Create a WGPU image view for this image
-                // TODO: Move this to Texture2D::from_vk_image
-                let wgpu_texture = vulkan_image_to_texture(
-                    device,
-                    vk::Image::from_raw(image),
-                    wgpu_tex_desc,
-                    wgpu_hal_tex_desc,
-                );
-
-                Texture2D::<Unbound>::from_wgpu(device, wgpu_texture)
+                    SWAPCHAIN_COLOR_FORMAT,
+                )
+                .ok()
             })
             .collect();
+
+        if swapcain_textures.is_empty() {
+            return Err(anyhow::anyhow!("No swapchain images"));
+        }
 
         Ok((xr_swapchain, resolution, swapcain_textures))
     }
