@@ -11,15 +11,21 @@ use engine::{
     geometry::{ModelVertex, Vertex},
     input::InputContext,
     screen::Screen,
+    swapchain::Swapchain,
     texture::{Bound, RoundRobinTextureBuffer, Texture2D, Unbound},
-    vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
+    vr::{
+        enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, SWAPCHAIN_DEPTH_FORMAT,
+        VIEW_COUNT, VIEW_TYPE,
+    },
     WgpuContext, WgpuLoader,
 };
 use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
 use log::error;
 use utils::commands::AppState;
 
-use openxr::ReferenceSpaceType;
+use openxr::{
+    ReferenceSpaceType,
+};
 use std::{
     iter,
     num::NonZeroU32,
@@ -395,7 +401,13 @@ fn run(
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: SWAPCHAIN_DEPTH_FORMAT.try_into()?,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
@@ -421,7 +433,13 @@ fn run(
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: SWAPCHAIN_DEPTH_FORMAT.try_into()?,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
@@ -467,7 +485,7 @@ fn run(
                 instance: wgpu_context.vk_instance_ptr as _,
                 physical_device: wgpu_context.vk_phys_device_ptr as _,
                 device: wgpu_context.vk_device_ptr as _,
-                queue_family_index: wgpu_context.queue_index,
+                queue_family_index: wgpu_context.family_queue_index,
                 queue_index: 0,
             },
         )?
@@ -670,7 +688,7 @@ fn run(
                     };
 
                     // If we do not have a swapchain yet, create it
-                    let (xr_swapchain, resolution, swapchain_textures) = {
+                    let (color_swapchain, depth_swapchain, resolution) = {
                         #[cfg(feature = "profiling")]
                         profiling::scope!("Swapchain Setup");
 
@@ -683,17 +701,14 @@ fn run(
                             }
                         }
                     };
+
                     // Check which image we need to render to and wait until the compositor is
                     // done with this image
-                    let image_index = xr_swapchain.acquire_image()?;
-                    {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Swapchain Wait");
+                    let swapchain_color_view = color_swapchain.wait_next_image()?;
 
-                        xr_swapchain.wait_image(openxr::Duration::INFINITE)?;
-                    }
-
-                    let swapchain_view = &swapchain_textures[image_index as usize].view;
+                    let swapchain_depth_view = depth_swapchain
+                        .as_mut()
+                        .and_then(|depth_swapchain| depth_swapchain.wait_next_image().ok());
 
                     // Must be called before any rendering is done!
                     {
@@ -717,7 +732,11 @@ fn run(
                             );
                         }
 
-                        xr_swapchain.release_image()?;
+                        color_swapchain.release_image()?;
+
+                        if let Some(depth_swapchain) = depth_swapchain {
+                            depth_swapchain.release_image()?;
+                        }
 
                         // Early bail
                         if let Err(err) = frame_stream.end(
@@ -792,14 +811,23 @@ fn run(
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("Render Pass"),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: swapchain_view,
+                                view: swapchain_color_view,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                     store: true,
                                 },
                             })],
-                            depth_stencil_attachment: None,
+                            depth_stencil_attachment: swapchain_depth_view.map(|depth_view| {
+                                wgpu::RenderPassDepthStencilAttachment {
+                                    view: depth_view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1.0),
+                                        store: true,
+                                    }),
+                                    stencil_ops: None,
+                                }
+                            }),
                         });
 
                         // Render the ambient dome
@@ -875,58 +903,24 @@ fn run(
                         #[cfg(feature = "profiling")]
                         profiling::scope!("Release Swapchain");
 
-                        xr_swapchain.release_image()?;
+                        color_swapchain.release_image()?;
+
+                        if let Some(depth_swapchain) = depth_swapchain {
+                            depth_swapchain.release_image()?;
+                        }
                     }
 
-                    log::trace!("End frame stream");
-                    {
-                        #[cfg(feature = "profiling")]
-                        let predicted_display_time_nanos =
-                            xr_frame_state.predicted_display_time.as_nanos();
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!(
-                            "End Frame",
-                            format!("{predicted_display_time_nanos}").as_str()
-                        );
-
-                        // End rendering and submit the images
-                        let rect = openxr::Rect2Di {
-                            offset: openxr::Offset2Di { x: 0, y: 0 },
-                            extent: openxr::Extent2Di {
-                                width: resolution.width as _,
-                                height: resolution.height as _,
-                            },
-                        };
-
-                        if let Err(err) = frame_stream.end(
-                            xr_frame_state.predicted_display_time,
-                            xr_context.blend_mode,
-                            &[&openxr::CompositionLayerProjection::new()
-                                .space(&xr_space)
-                                .views(&[
-                                    openxr::CompositionLayerProjectionView::new()
-                                        .pose(views[0].pose)
-                                        .fov(views[0].fov)
-                                        .sub_image(
-                                            openxr::SwapchainSubImage::new()
-                                                .swapchain(xr_swapchain)
-                                                .image_array_index(0)
-                                                .image_rect(rect),
-                                        ),
-                                    openxr::CompositionLayerProjectionView::new()
-                                        .pose(views[1].pose)
-                                        .fov(views[1].fov)
-                                        .sub_image(
-                                            openxr::SwapchainSubImage::new()
-                                                .swapchain(xr_swapchain)
-                                                .image_array_index(1)
-                                                .image_rect(rect),
-                                        ),
-                                ])],
-                        ) {
-                            log::error!("Failed to end frame stream: {}", err);
-                        };
-                    }
+                    end_framestream(FrameStreamEndInfo {
+                        xr_frame_state: &xr_frame_state,
+                        resolution,
+                        depth_swapchain,
+                        frame_stream: &mut frame_stream,
+                        xr_context,
+                        xr_space: &xr_space,
+                        views: &views,
+                        color_swapchain,
+                        cameras: &cameras,
+                    });
 
                     //XR Input processing
                     if input_context.is_some() {
@@ -937,30 +931,32 @@ fn run(
                             .as_mut()
                             .context("Cannot borrow input context as mutable")?;
 
-                        if input_context
-                            .process_inputs(
-                                &xr_session,
-                                &xr_frame_state,
-                                &xr_reference_space,
-                                &xr_view_space,
-                            )
-                            .is_ok()
-                        {
-                            if let Some(new_state) = &input_context.input_state {
-                                if new_state.hands_near_head > 0
-                                    && new_state.near_start.elapsed().as_secs() > 3
-                                {
-                                    let should_unlock_horizon = new_state.hands_near_head > 1
-                                        || (new_state.hands_near_head == 1
-                                            && new_state.count_change.elapsed().as_secs() < 1);
+                        match input_context.process_inputs(
+                            &xr_session,
+                            &xr_frame_state,
+                            &xr_reference_space,
+                            &xr_view_space,
+                        ) {
+                            Ok(()) => {
+                                if let Some(new_state) = &input_context.input_state {
+                                    if new_state.hands_near_head > 0
+                                        && new_state.near_start.elapsed().as_secs() > 3
+                                    {
+                                        let should_unlock_horizon = new_state.hands_near_head > 1
+                                            || (new_state.hands_near_head == 1
+                                                && new_state.count_change.elapsed().as_secs() < 1);
 
-                                    if recenter_request.is_none() {
-                                        recenter_request = Some(RecenterRequest {
-                                            horizon_locked: !should_unlock_horizon,
-                                            delay: 0,
-                                        });
+                                        if recenter_request.is_none() {
+                                            recenter_request = Some(RecenterRequest {
+                                                horizon_locked: !should_unlock_horizon,
+                                                delay: 0,
+                                            });
+                                        }
                                     }
                                 }
+                            }
+                            Err(err) => {
+                                log::error!("Failed to process inputs: {}", err);
                             }
                         }
                     }
@@ -1081,6 +1077,139 @@ fn run(
     }
 
     Ok(())
+}
+
+struct FrameStreamEndInfo<'a> {
+    xr_frame_state: &'a openxr::FrameState,
+    resolution: &'a ash::vk::Extent2D,
+    depth_swapchain: &'a Option<Swapchain>,
+    frame_stream: &'a mut openxr::FrameStream<openxr::Vulkan>,
+    xr_context: &'a OpenXRContext,
+    xr_space: &'a openxr::Space,
+    views: &'a [openxr::View],
+    color_swapchain: &'a Swapchain,
+    cameras: &'a [Camera],
+}
+fn end_framestream(frame_stream_end_info: FrameStreamEndInfo<'_>) {
+    let FrameStreamEndInfo {
+        xr_frame_state,
+        resolution,
+        depth_swapchain,
+        frame_stream,
+        xr_context,
+        xr_space,
+        views,
+        color_swapchain,
+        cameras,
+    } = frame_stream_end_info;
+
+    #[cfg(feature = "profiling")]
+    let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
+    #[cfg(feature = "profiling")]
+    profiling::scope!(
+        "End Frame",
+        format!("{predicted_display_time_nanos}").as_str()
+    );
+
+    log::trace!("End frame stream");
+
+    // End rendering and submit the images
+    let rect = openxr::Rect2Di {
+        offset: openxr::Offset2Di { x: 0, y: 0 },
+        extent: openxr::Extent2Di {
+            width: resolution.width as _,
+            height: resolution.height as _,
+        },
+    };
+
+    let mut left_depth_info = depth_swapchain.as_ref().map(|depth_swapchain| {
+        openxr::CompositionLayerDepthInfoKHR::new()
+            .sub_image(
+                openxr::SwapchainSubImage::new()
+                    .swapchain(depth_swapchain.internal())
+                    .image_array_index(0)
+                    .image_rect(rect),
+            )
+            .max_depth(1.0)
+            .min_depth(0.0)
+            .far_z(cameras[0].far)
+            .near_z(cameras[0].near)
+    });
+
+    let mut right_depth_info = depth_swapchain.as_ref().map(|depth_swapchain| {
+        openxr::CompositionLayerDepthInfoKHR::new()
+            .sub_image(
+                openxr::SwapchainSubImage::new()
+                    .swapchain(depth_swapchain.internal())
+                    .image_array_index(1)
+                    .image_rect(rect),
+            )
+            .max_depth(1.0)
+            .min_depth(0.0)
+            .far_z(cameras[1].far)
+            .near_z(cameras[1].near)
+    });
+
+    let mut fb_image_details = if xr_context
+        .instance
+        .exts()
+        .fb_composition_layer_image_layout
+        .is_some()
+    {
+        Some(
+            openxr::CompositionLayerImageLayoutFB::new()
+                .flags(openxr::CompositionLayerImageLayoutFlagsFB::VERTICAL_FLIP),
+        )
+    } else {
+        None
+    };
+
+    let views = [
+        get_projection_view(0, views, color_swapchain, rect, &mut left_depth_info),
+        get_projection_view(1, views, color_swapchain, rect, &mut right_depth_info),
+    ];
+
+    let projection_layer = if let Some(fb_image_details) = fb_image_details.as_mut() {
+        use openxr::ImplCompositionLayerBase;
+        openxr::CompositionLayerProjection::new()
+            .space(xr_space)
+            .views(&views)
+            .push_next(fb_image_details)
+    } else {
+        openxr::CompositionLayerProjection::new()
+            .space(xr_space)
+            .views(&views)
+    };
+
+    if let Err(err) = frame_stream.end(
+        xr_frame_state.predicted_display_time,
+        xr_context.blend_mode,
+        &[&projection_layer],
+    ) {
+        log::error!("Failed to end frame stream: {}", err);
+    };
+}
+
+#[cfg_attr(feature = "profiling", profiling::function)]
+fn get_projection_view<'a>(
+    eye_index: usize,
+    views: &[openxr::View],
+    color_swapchain: &'a engine::swapchain::Swapchain,
+    rect: openxr::Rect2Di,
+    depth_info: &'a mut Option<openxr::CompositionLayerDepthInfoKHR<'a, openxr::Vulkan>>,
+) -> openxr::CompositionLayerProjectionView<'a, openxr::Vulkan> {
+    match depth_info.as_mut() {
+        Some(depth_info) => openxr::CompositionLayerProjectionView::new().push_next(depth_info),
+        None => openxr::CompositionLayerProjectionView::new(),
+    }
+    .pose(views[eye_index].pose)
+    .fov(views[eye_index].fov)
+    .sub_image(
+        openxr::SwapchainSubImage::new()
+            .swapchain(color_swapchain.internal())
+            .image_array_index(eye_index as u32)
+            .image_rect(rect),
+    )
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]

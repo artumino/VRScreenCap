@@ -7,6 +7,7 @@ pub mod geometry;
 pub mod input;
 pub mod jitter;
 pub mod screen;
+pub mod swapchain;
 pub mod texture;
 pub mod vr;
 
@@ -19,7 +20,7 @@ pub struct WgpuContext {
     pub vk_instance_ptr: u64,
     pub vk_phys_device_ptr: u64,
     pub vk_device_ptr: u64,
-    pub queue_index: u32,
+    pub family_queue_index: u32,
     pub instance: wgpu::Instance,
     pub device: wgpu::Device,
     pub physical_device: wgpu::Adapter,

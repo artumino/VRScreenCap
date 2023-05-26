@@ -53,10 +53,10 @@ windows = { version = "0.48.0", features = [
 ]}
 captrs = "0.3.1"
 win_desktop_duplication = { git = "https://github.com/artumino/win_desktop_duplication.git", branch = "dev" }
-openxr = { version = "0.17.1", features =  [ "static", "mint" ] }
+openxr = { version = "0.17.1", features =  [ "static", "mint" ], git = "https://github.com/artumino/openxrs.git" }
 
 [target.'cfg(target_os = "android")'.dependencies]
-openxr = { version = "0.17.1", features =  [ "loaded", "mint" ] }
+openxr = { version = "0.17.1", features =  [ "loaded", "mint" ], git = "https://github.com/artumino/openxrs.git"  }
 jni = "0.21.1"
 ndk = "0.7"
 ndk-glue = "0.7"
