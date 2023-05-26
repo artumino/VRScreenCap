@@ -23,9 +23,7 @@ use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
 use log::error;
 use utils::commands::AppState;
 
-use openxr::{
-    ReferenceSpaceType,
-};
+use openxr::ReferenceSpaceType;
 use std::{
     iter,
     num::NonZeroU32,
@@ -910,17 +908,21 @@ fn run(
                         }
                     }
 
-                    end_framestream(FrameStreamEndInfo {
-                        xr_frame_state: &xr_frame_state,
-                        resolution,
-                        depth_swapchain,
-                        frame_stream: &mut frame_stream,
-                        xr_context,
-                        xr_space: &xr_space,
-                        views: &views,
-                        color_swapchain,
-                        cameras: &cameras,
-                    });
+                    end_framestream(
+                        #[cfg(feature = "profiling")]
+                        &time,
+                        FrameStreamEndInfo {
+                            xr_frame_state: &xr_frame_state,
+                            resolution,
+                            depth_swapchain,
+                            frame_stream: &mut frame_stream,
+                            xr_context,
+                            xr_space: &xr_space,
+                            views: &views,
+                            color_swapchain,
+                            cameras: &cameras,
+                        },
+                    );
 
                     //XR Input processing
                     if input_context.is_some() {
@@ -1090,7 +1092,11 @@ struct FrameStreamEndInfo<'a> {
     color_swapchain: &'a Swapchain,
     cameras: &'a [Camera],
 }
-fn end_framestream(frame_stream_end_info: FrameStreamEndInfo<'_>) {
+fn end_framestream(
+    #[cfg(feature = "profiling")]
+    frame_begin_instant: &std::time::Instant,
+    frame_stream_end_info: FrameStreamEndInfo<'_>,
+) {
     let FrameStreamEndInfo {
         xr_frame_state,
         resolution,
@@ -1102,14 +1108,6 @@ fn end_framestream(frame_stream_end_info: FrameStreamEndInfo<'_>) {
         color_swapchain,
         cameras,
     } = frame_stream_end_info;
-
-    #[cfg(feature = "profiling")]
-    let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
-    #[cfg(feature = "profiling")]
-    profiling::scope!(
-        "End Frame",
-        format!("{predicted_display_time_nanos}").as_str()
-    );
 
     log::trace!("End frame stream");
 
@@ -1150,44 +1148,37 @@ fn end_framestream(frame_stream_end_info: FrameStreamEndInfo<'_>) {
             .near_z(cameras[1].near)
     });
 
-    let mut fb_image_details = if xr_context
-        .instance
-        .exts()
-        .fb_composition_layer_image_layout
-        .is_some()
-    {
-        Some(
-            openxr::CompositionLayerImageLayoutFB::new()
-                .flags(openxr::CompositionLayerImageLayoutFlagsFB::VERTICAL_FLIP),
-        )
-    } else {
-        None
-    };
-
     let views = [
         get_projection_view(0, views, color_swapchain, rect, &mut left_depth_info),
         get_projection_view(1, views, color_swapchain, rect, &mut right_depth_info),
     ];
 
-    let projection_layer = if let Some(fb_image_details) = fb_image_details.as_mut() {
-        use openxr::ImplCompositionLayerBase;
-        openxr::CompositionLayerProjection::new()
-            .space(xr_space)
-            .views(&views)
-            .push_next(fb_image_details)
-    } else {
-        openxr::CompositionLayerProjection::new()
-            .space(xr_space)
-            .views(&views)
-    };
+    {
+        #[cfg(feature = "profiling")]
+        let predicted_display_time_nanos = xr_frame_state.predicted_display_time.as_nanos();
+        #[cfg(feature = "profiling")]
+        let actual_duration = std::time::Instant::now()
+            .duration_since(*frame_begin_instant)
+            .as_nanos() as i64;
+        #[cfg(feature = "profiling")]
+        let prediction_latentcy =
+            xr_frame_state.predicted_display_period.as_nanos() - actual_duration;
+        #[cfg(feature = "profiling")]
+        profiling::scope!(
+            "End Frame",
+            format!("Predicted: {predicted_display_time_nanos}, PredictionLatency: {prediction_latentcy}").as_str()
+        );
 
-    if let Err(err) = frame_stream.end(
-        xr_frame_state.predicted_display_time,
-        xr_context.blend_mode,
-        &[&projection_layer],
-    ) {
-        log::error!("Failed to end frame stream: {}", err);
-    };
+        if let Err(err) = frame_stream.end(
+            xr_frame_state.predicted_display_time,
+            xr_context.blend_mode,
+            &[&openxr::CompositionLayerProjection::new()
+                .space(xr_space)
+                .views(&views)],
+        ) {
+            log::error!("Failed to end frame stream: {}", err);
+        };
+    }
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]

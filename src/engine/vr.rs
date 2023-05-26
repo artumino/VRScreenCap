@@ -51,9 +51,12 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
 
     let mut enabled_extensions = openxr::ExtensionSet::default();
     enabled_extensions.khr_vulkan_enable2 = true;
+    enabled_extensions.khr_composition_layer_depth =
+        available_extensions.khr_composition_layer_depth;
 
     #[cfg(target_os = "android")]
     {
+        assert!(available_extensions.khr_android_create_instance);
         enabled_extensions.khr_android_create_instance = true;
     }
     log::info!("Enabled extensions: {:?}", enabled_extensions);
@@ -110,7 +113,6 @@ fn instance_flags() -> hal::InstanceFlags {
 }
 
 impl WgpuLoader for OpenXRContext {
-    #[cfg_attr(feature = "profiling", profiling::function)]
     fn load_wgpu(&mut self) -> anyhow::Result<super::WgpuContext> {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
