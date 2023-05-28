@@ -7,6 +7,7 @@ pub mod geometry;
 pub mod input;
 pub mod jitter;
 pub mod screen;
+pub mod space;
 pub mod swapchain;
 pub mod texture;
 pub mod vr;

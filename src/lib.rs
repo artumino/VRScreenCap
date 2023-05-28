@@ -3,7 +3,7 @@ use ::windows::Win32::System::Threading::{
     GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS,
 };
 use anyhow::Context;
-use cgmath::Rotation3;
+
 use clap::Parser;
 use config::{AppConfig, TemporalBlurParams};
 use engine::{
@@ -11,6 +11,7 @@ use engine::{
     geometry::{ModelVertex, Vertex},
     input::InputContext,
     screen::Screen,
+    space::AppSpace,
     swapchain::Swapchain,
     texture::{Bound, RoundRobinTextureBuffer, Texture2D, Unbound},
     vr::{
@@ -23,7 +24,7 @@ use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
 use log::error;
 use utils::commands::AppState;
 
-use openxr::ReferenceSpaceType;
+
 use std::{
     iter,
     num::NonZeroU32,
@@ -490,13 +491,7 @@ fn run(
     };
 
     // Create a room-scale reference space
-    let xr_reference_space = xr_session
-        .create_reference_space(openxr::ReferenceSpaceType::LOCAL, openxr::Posef::IDENTITY)?;
-    let xr_view_space = xr_session
-        .create_reference_space(openxr::ReferenceSpaceType::VIEW, openxr::Posef::IDENTITY)?;
-    let mut xr_space = xr_session
-        .create_reference_space(openxr::ReferenceSpaceType::LOCAL, openxr::Posef::IDENTITY)?;
-
+    let mut app_space = AppSpace::new(&xr_session)?;
     let mut event_storage = openxr::EventDataBuffer::new();
     let mut session_running = false;
     let mut swapchain = None;
@@ -512,14 +507,21 @@ fn run(
         let mut attach_context = input_context
             .take()
             .context("Cannot attach input context to session")?;
-        if attach_context.attach_to_session(&xr_session).is_ok() {
+        if let Err(attach_context_err) = attach_context.attach_to_session(&xr_session) {
+            log::error!(
+                "Cannot attach input context to session: {}",
+                attach_context_err
+            );
+        } else {
             input_context = Some(attach_context);
         }
+    } else {
+        log::error!("No input context available");
     }
 
     let mut jitter_frame: u32 = 0;
     // Handle OpenXR events
-    loop {
+    'render_loop: loop {
         #[cfg(feature = "profiling")]
         profiling::scope!("main loop");
 
@@ -640,351 +642,346 @@ fn run(
             }
         }
 
-        let event = xr_context.instance.poll_event(&mut event_storage)?;
-        match event {
-            Some(openxr::Event::SessionStateChanged(e)) => {
-                // Session state change is where we can begin and end sessions, as well as
-                // find quit messages!
-                log::info!("Entered state {:?}", e.state());
-                match e.state() {
-                    openxr::SessionState::READY => {
-                        xr_session.begin(VIEW_TYPE)?;
-                        session_running = true;
+        while let Some(event) = xr_context.instance.poll_event(&mut event_storage)? {
+            match event {
+                openxr::Event::SessionStateChanged(e) => {
+                    // Session state change is where we can begin and end sessions, as well as
+                    // find quit messages!
+                    log::info!("Entered state {:?}", e.state());
+                    match e.state() {
+                        openxr::SessionState::READY => {
+                            xr_session.begin(VIEW_TYPE)?;
+                            session_running = true;
+                        }
+                        openxr::SessionState::STOPPING => {
+                            xr_session.end()?;
+                            session_running = false;
+                        }
+                        openxr::SessionState::EXITING => {
+                            break 'render_loop;
+                        }
+                        _ => {}
                     }
-                    openxr::SessionState::STOPPING => {
-                        xr_session.end()?;
-                        session_running = false;
+                }
+                openxr::Event::InstanceLossPending(_) => {}
+                openxr::Event::EventsLost(e) => {
+                    log::error!("Lost {} OpenXR events", e.lost_event_count());
+                }
+                openxr::Event::ReferenceSpaceChangePending(_) => {
+                    //Reset XR space to follow runtime
+                    app_space = AppSpace::new(&xr_session)?;
+                }
+                _ => {}
+            }
+        }
+
+        // Render to HMD only if we have an active session
+        if !session_running {
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Session Sleep");
+
+            // avoid looping too fast
+            std::thread::sleep(std::time::Duration::from_millis(11));
+        } else {
+            // Block until the previous frame is finished displaying, and is ready for
+            // another one. Also returns a prediction of when the next frame will be
+            // displayed, for use with predicting locations of controllers, viewpoints, etc.
+            let xr_frame_state = {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Wait for frame");
+
+                frame_wait.wait()?
+            };
+
+            // If we do not have a swapchain yet, create it
+            let (color_swapchain, depth_swapchain, resolution) = {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Swapchain Setup");
+
+                match swapchain {
+                    Some(ref mut swapchain) => swapchain,
+                    None => {
+                        let new_swapchain =
+                            xr_context.create_swapchain(&xr_session, &wgpu_context.device)?;
+                        swapchain.get_or_insert(new_swapchain)
                     }
-                    openxr::SessionState::EXITING => {
-                        break;
-                    }
-                    _ => {}
+                }
+            };
+
+            // Check which image we need to render to and wait until the compositor is
+            // done with this image
+            let swapchain_color_view = color_swapchain.wait_next_image()?;
+
+            let swapchain_depth_view = depth_swapchain
+                .as_mut()
+                .and_then(|depth_swapchain| depth_swapchain.wait_next_image().ok());
+
+            // Must be called before any rendering is done!
+            {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Begin FrameStream");
+                frame_stream.begin()?;
+            }
+
+            #[cfg(feature = "profiling")]
+            profiling::scope!("FrameStream Recording");
+
+            // Only render if we should
+            if !xr_frame_state.should_render {
+                #[cfg(feature = "profiling")]
+                {
+                    let predicted_display_time_nanos =
+                        xr_frame_state.predicted_display_time.as_nanos();
+                    profiling::scope!(
+                        "Show Time Calculation",
+                        format!("{predicted_display_time_nanos}").as_str()
+                    );
+                }
+
+                color_swapchain.release_image()?;
+
+                if let Some(depth_swapchain) = depth_swapchain {
+                    depth_swapchain.release_image()?;
+                }
+
+                // Early bail
+                if let Err(err) = frame_stream.end(
+                    xr_frame_state.predicted_display_time,
+                    xr_context.blend_mode,
+                    &[],
+                ) {
+                    log::error!(
+                        "Failed to end frame stream when should_render is FALSE : {:?}",
+                        err
+                    );
+                };
+                continue;
+            }
+
+            #[cfg(feature = "profiling")]
+            profiling::scope!("Encode Render Passes");
+
+            // Render!
+            let mut encoder =
+                wgpu_context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Render Encorder"),
+                    });
+
+            if let Some(loader) = current_loader.and_then(|index| loaders.get(index)) {
+                loader.encode_pre_pass(&mut encoder, &screen_texture)?;
+            }
+
+            if screen.ambient_enabled {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Encode Ambient Pass");
+
+                ambient_texture.next();
+                let mut blit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Blit Pass"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &ambient_texture.current().view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: true,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &ambient_texture.previous(1).view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: true,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: None,
+                });
+
+                blit_pass.set_pipeline(&temporal_blur_pipeline);
+                blit_pass.set_bind_group(0, screen_texture.bind_group(), &[]);
+                blit_pass.set_bind_group(1, ambient_texture.previous(2).bind_group(), &[]);
+                blit_pass.set_bind_group(2, &global_temporal_blur_uniform_bind_group, &[]);
+                blit_pass.set_index_buffer(
+                    fullscreen_triangle_index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                blit_pass.draw_indexed(0..3, 0, 0..1);
+            }
+            {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Encode Render Pass");
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: swapchain_color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: true,
+                        },
+                    })],
+                    depth_stencil_attachment: swapchain_depth_view.map(|depth_view| {
+                        wgpu::RenderPassDepthStencilAttachment {
+                            view: depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: true,
+                            }),
+                            stencil_ops: None,
+                        }
+                    }),
+                });
+
+                // Render the ambient dome
+                if screen.ambient_enabled {
+                    let ambient_mesh = &screen.ambient_mesh;
+                    rpass.set_pipeline(&ambient_dome_pipeline);
+                    rpass.set_bind_group(0, ambient_texture.current().bind_group(), &[]);
+                    rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
+                    rpass.set_vertex_buffer(0, ambient_mesh.vertex_buffer().slice(..));
+                    rpass.set_index_buffer(
+                        ambient_mesh.index_buffer().slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    rpass.draw_indexed(0..ambient_mesh.indices(), 0, 0..1);
+                }
+
+                // Render the screen
+                rpass.set_pipeline(&screen_render_pipeline);
+                rpass.set_bind_group(0, screen_texture.bind_group(), &[]);
+                rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
+                rpass.set_vertex_buffer(0, screen.mesh.vertex_buffer().slice(..));
+                rpass.set_index_buffer(
+                    screen.mesh.index_buffer().slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
+            }
+
+            if screen.ambient_enabled {
+                upload_blur_uniforms(
+                    &ambient_texture,
+                    &mut jitter_frame,
+                    &mut temporal_blur_params,
+                    wgpu_context,
+                    &temporal_blur_params_buffer,
+                );
+            }
+
+            // Fetch the view transforms. To minimize latency, we intentionally do this
+            // *after* recording commands to render the scene, i.e. at the last possible
+            // moment before rendering begins in earnest on the GPU. Uniforms dependent on
+            // this data can be sent to the GPU just-in-time by writing them to per-frame
+            // host-visible memory which the GPU will only read once the command buffer is
+            // submitted.
+            log::trace!("Locate views");
+            let (_, views) = {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Locate Views");
+                xr_session.locate_views(
+                    VIEW_TYPE,
+                    xr_frame_state.predicted_display_time,
+                    app_space.space(),
+                )?
+            };
+
+            upload_camera_uniforms(
+                &views,
+                &mut cameras,
+                &mut camera_uniform,
+                wgpu_context,
+                &camera_buffer,
+            )?;
+
+            log::trace!("Submit command buffer");
+            {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Encoder Submit");
+                wgpu_context.queue.submit(iter::once(encoder.finish()));
+            }
+
+            log::trace!("Release swapchain image");
+            {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Release Swapchain");
+
+                color_swapchain.release_image()?;
+
+                if let Some(depth_swapchain) = depth_swapchain {
+                    depth_swapchain.release_image()?;
                 }
             }
-            Some(openxr::Event::InstanceLossPending(_)) => {}
-            Some(openxr::Event::EventsLost(e)) => {
-                log::error!("Lost {} OpenXR events", e.lost_event_count());
-            }
-            Some(openxr::Event::ReferenceSpaceChangePending(_)) => {
-                //Reset XR space to follow runtime
-                xr_space = xr_session.create_reference_space(
-                    openxr::ReferenceSpaceType::LOCAL,
-                    openxr::Posef::IDENTITY,
-                )?;
-            }
-            _ => {
-                // Render to HMD only if we have an active session
-                if session_running {
-                    // Block until the previous frame is finished displaying, and is ready for
-                    // another one. Also returns a prediction of when the next frame will be
-                    // displayed, for use with predicting locations of controllers, viewpoints, etc.
-                    let xr_frame_state = {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Wait for frame");
 
-                        frame_wait.wait()?
-                    };
+            end_framestream(
+                #[cfg(feature = "profiling")]
+                &time,
+                FrameStreamEndInfo {
+                    xr_frame_state: &xr_frame_state,
+                    resolution,
+                    depth_swapchain,
+                    frame_stream: &mut frame_stream,
+                    xr_context,
+                    xr_space: app_space.space(),
+                    views: &views,
+                    color_swapchain,
+                    cameras: &cameras,
+                },
+            );
 
-                    // If we do not have a swapchain yet, create it
-                    let (color_swapchain, depth_swapchain, resolution) = {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Swapchain Setup");
+            //XR Input processing
+            if input_context.is_some() {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Process Inputs");
 
-                        match swapchain {
-                            Some(ref mut swapchain) => swapchain,
-                            None => {
-                                let new_swapchain = xr_context
-                                    .create_swapchain(&xr_session, &wgpu_context.device)?;
-                                swapchain.get_or_insert(new_swapchain)
-                            }
-                        }
-                    };
+                let input_context = input_context
+                    .as_mut()
+                    .context("Cannot borrow input context as mutable")?;
 
-                    // Check which image we need to render to and wait until the compositor is
-                    // done with this image
-                    let swapchain_color_view = color_swapchain.wait_next_image()?;
+                match input_context.process_inputs(
+                    &xr_session,
+                    &xr_frame_state,
+                    app_space.reference_space(),
+                    app_space.view_space(),
+                ) {
+                    Ok(()) => {
+                        if let Some(new_state) = &input_context.input_state {
+                            if new_state.hands_near_head > 0
+                                && new_state.near_start.elapsed().as_secs() > 3
+                            {
+                                let should_unlock_horizon = new_state.hands_near_head > 1
+                                    || (new_state.hands_near_head == 1
+                                        && new_state.count_change.elapsed().as_secs() < 1);
 
-                    let swapchain_depth_view = depth_swapchain
-                        .as_mut()
-                        .and_then(|depth_swapchain| depth_swapchain.wait_next_image().ok());
-
-                    // Must be called before any rendering is done!
-                    {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Begin FrameStream");
-                        frame_stream.begin()?;
-                    }
-
-                    #[cfg(feature = "profiling")]
-                    profiling::scope!("FrameStream Recording");
-
-                    // Only render if we should
-                    if !xr_frame_state.should_render {
-                        #[cfg(feature = "profiling")]
-                        {
-                            let predicted_display_time_nanos =
-                                xr_frame_state.predicted_display_time.as_nanos();
-                            profiling::scope!(
-                                "Show Time Calculation",
-                                format!("{predicted_display_time_nanos}").as_str()
-                            );
-                        }
-
-                        color_swapchain.release_image()?;
-
-                        if let Some(depth_swapchain) = depth_swapchain {
-                            depth_swapchain.release_image()?;
-                        }
-
-                        // Early bail
-                        if let Err(err) = frame_stream.end(
-                            xr_frame_state.predicted_display_time,
-                            xr_context.blend_mode,
-                            &[],
-                        ) {
-                            log::error!(
-                                "Failed to end frame stream when should_render is FALSE : {:?}",
-                                err
-                            );
-                        };
-                        continue;
-                    }
-
-                    #[cfg(feature = "profiling")]
-                    profiling::scope!("Encode Render Passes");
-
-                    // Render!
-                    let mut encoder = wgpu_context.device.create_command_encoder(
-                        &wgpu::CommandEncoderDescriptor {
-                            label: Some("Render Encorder"),
-                        },
-                    );
-
-                    if let Some(loader) = current_loader.and_then(|index| loaders.get(index)) {
-                        loader.encode_pre_pass(&mut encoder, &screen_texture)?;
-                    }
-
-                    if screen.ambient_enabled {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Encode Ambient Pass");
-
-                        ambient_texture.next();
-                        let mut blit_pass =
-                            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("Blit Pass"),
-                                color_attachments: &[
-                                    Some(wgpu::RenderPassColorAttachment {
-                                        view: &ambient_texture.current().view,
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                            store: true,
-                                        },
-                                    }),
-                                    Some(wgpu::RenderPassColorAttachment {
-                                        view: &ambient_texture.previous(1).view,
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                            store: true,
-                                        },
-                                    }),
-                                ],
-                                depth_stencil_attachment: None,
-                            });
-
-                        blit_pass.set_pipeline(&temporal_blur_pipeline);
-                        blit_pass.set_bind_group(0, screen_texture.bind_group(), &[]);
-                        blit_pass.set_bind_group(1, ambient_texture.previous(2).bind_group(), &[]);
-                        blit_pass.set_bind_group(2, &global_temporal_blur_uniform_bind_group, &[]);
-                        blit_pass.set_index_buffer(
-                            fullscreen_triangle_index_buffer.slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        blit_pass.draw_indexed(0..3, 0, 0..1);
-                    }
-                    {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Encode Render Pass");
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("Render Pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: swapchain_color_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: swapchain_depth_view.map(|depth_view| {
-                                wgpu::RenderPassDepthStencilAttachment {
-                                    view: depth_view,
-                                    depth_ops: Some(wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(1.0),
-                                        store: true,
-                                    }),
-                                    stencil_ops: None,
-                                }
-                            }),
-                        });
-
-                        // Render the ambient dome
-                        if screen.ambient_enabled {
-                            let ambient_mesh = &screen.ambient_mesh;
-                            rpass.set_pipeline(&ambient_dome_pipeline);
-                            rpass.set_bind_group(0, ambient_texture.current().bind_group(), &[]);
-                            rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
-                            rpass.set_vertex_buffer(0, ambient_mesh.vertex_buffer().slice(..));
-                            rpass.set_index_buffer(
-                                ambient_mesh.index_buffer().slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            rpass.draw_indexed(0..ambient_mesh.indices(), 0, 0..1);
-                        }
-
-                        // Render the screen
-                        rpass.set_pipeline(&screen_render_pipeline);
-                        rpass.set_bind_group(0, screen_texture.bind_group(), &[]);
-                        rpass.set_bind_group(1, &global_uniform_bind_group, &[]);
-                        rpass.set_vertex_buffer(0, screen.mesh.vertex_buffer().slice(..));
-                        rpass.set_index_buffer(
-                            screen.mesh.index_buffer().slice(..),
-                            wgpu::IndexFormat::Uint32,
-                        );
-                        rpass.draw_indexed(0..screen.mesh.indices(), 0, 0..1);
-                    }
-
-                    if screen.ambient_enabled {
-                        upload_blur_uniforms(
-                            &ambient_texture,
-                            &mut jitter_frame,
-                            &mut temporal_blur_params,
-                            wgpu_context,
-                            &temporal_blur_params_buffer,
-                        );
-                    }
-
-                    // Fetch the view transforms. To minimize latency, we intentionally do this
-                    // *after* recording commands to render the scene, i.e. at the last possible
-                    // moment before rendering begins in earnest on the GPU. Uniforms dependent on
-                    // this data can be sent to the GPU just-in-time by writing them to per-frame
-                    // host-visible memory which the GPU will only read once the command buffer is
-                    // submitted.
-                    log::trace!("Locate views");
-                    let (_, views) = {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Locate Views");
-                        xr_session.locate_views(
-                            VIEW_TYPE,
-                            xr_frame_state.predicted_display_time,
-                            &xr_space,
-                        )?
-                    };
-
-                    upload_camera_uniforms(
-                        &views,
-                        &mut cameras,
-                        &mut camera_uniform,
-                        wgpu_context,
-                        &camera_buffer,
-                    )?;
-
-                    log::trace!("Submit command buffer");
-                    {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Encoder Submit");
-                        wgpu_context.queue.submit(iter::once(encoder.finish()));
-                    }
-
-                    log::trace!("Release swapchain image");
-                    {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Release Swapchain");
-
-                        color_swapchain.release_image()?;
-
-                        if let Some(depth_swapchain) = depth_swapchain {
-                            depth_swapchain.release_image()?;
-                        }
-                    }
-
-                    end_framestream(
-                        #[cfg(feature = "profiling")]
-                        &time,
-                        FrameStreamEndInfo {
-                            xr_frame_state: &xr_frame_state,
-                            resolution,
-                            depth_swapchain,
-                            frame_stream: &mut frame_stream,
-                            xr_context,
-                            xr_space: &xr_space,
-                            views: &views,
-                            color_swapchain,
-                            cameras: &cameras,
-                        },
-                    );
-
-                    //XR Input processing
-                    if input_context.is_some() {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Process Inputs");
-
-                        let input_context = input_context
-                            .as_mut()
-                            .context("Cannot borrow input context as mutable")?;
-
-                        match input_context.process_inputs(
-                            &xr_session,
-                            &xr_frame_state,
-                            &xr_reference_space,
-                            &xr_view_space,
-                        ) {
-                            Ok(()) => {
-                                if let Some(new_state) = &input_context.input_state {
-                                    if new_state.hands_near_head > 0
-                                        && new_state.near_start.elapsed().as_secs() > 3
-                                    {
-                                        let should_unlock_horizon = new_state.hands_near_head > 1
-                                            || (new_state.hands_near_head == 1
-                                                && new_state.count_change.elapsed().as_secs() < 1);
-
-                                        if recenter_request.is_none() {
-                                            recenter_request = Some(RecenterRequest {
-                                                horizon_locked: !should_unlock_horizon,
-                                                delay: 0,
-                                            });
-                                        }
-                                    }
+                                if recenter_request.is_none() {
+                                    recenter_request = Some(RecenterRequest {
+                                        horizon_locked: !should_unlock_horizon,
+                                        delay: 0,
+                                    });
                                 }
                             }
-                            Err(err) => {
-                                log::error!("Failed to process inputs: {}", err);
-                            }
                         }
                     }
-
-                    if let Some(recenter_request) = recenter_request.take() {
-                        #[cfg(feature = "profiling")]
-                        profiling::scope!("Recenter Scene");
-
-                        if let Err(err) = recenter_scene(
-                            &xr_session,
-                            &xr_reference_space,
-                            &xr_view_space,
-                            xr_frame_state.predicted_display_time,
-                            recenter_request.horizon_locked,
-                            recenter_request.delay,
-                            &mut xr_space,
-                        ) {
-                            log::error!("Failed to recenter scene: {}", err);
-                        }
+                    Err(err) => {
+                        log::error!("Failed to process inputs: {}", err);
                     }
-                } else {
-                    #[cfg(feature = "profiling")]
-                    profiling::scope!("Session Sleep");
+                }
+            }
 
-                    // avoid looping too fast
-                    std::thread::sleep(std::time::Duration::from_millis(11));
+            if let Some(recenter_request) = recenter_request.take() {
+                #[cfg(feature = "profiling")]
+                profiling::scope!("Recenter Scene");
+
+                if let Err(err) = app_space.recenter(
+                    &xr_session,
+                    xr_frame_state.predicted_display_time,
+                    recenter_request.horizon_locked,
+                    recenter_request.delay,
+                ) {
+                    log::error!("Failed to recenter scene: {}", err);
                 }
             }
         }
@@ -1002,7 +999,7 @@ fn run(
             {
                 Some(AppCommands::Quit) => {
                     log::info!("Qutting app manually...");
-                    break;
+                    break 'render_loop;
                 }
                 Some(AppCommands::Reload) => {
                     current_loader = None;
@@ -1093,8 +1090,7 @@ struct FrameStreamEndInfo<'a> {
     cameras: &'a [Camera],
 }
 fn end_framestream(
-    #[cfg(feature = "profiling")]
-    frame_begin_instant: &std::time::Instant,
+    #[cfg(feature = "profiling")] frame_begin_instant: &std::time::Instant,
     frame_stream_end_info: FrameStreamEndInfo<'_>,
 ) {
     let FrameStreamEndInfo {
@@ -1148,7 +1144,7 @@ fn end_framestream(
             .near_z(cameras[1].near)
     });
 
-    let views = [
+    let proj_views = [
         get_projection_view(0, views, color_swapchain, rect, &mut left_depth_info),
         get_projection_view(1, views, color_swapchain, rect, &mut right_depth_info),
     ];
@@ -1174,7 +1170,7 @@ fn end_framestream(
             xr_context.blend_mode,
             &[&openxr::CompositionLayerProjection::new()
                 .space(xr_space)
-                .views(&views)],
+                .views(&proj_views)],
         ) {
             log::error!("Failed to end frame stream: {}", err);
         };
@@ -1304,45 +1300,6 @@ fn get_ambient_texture(
     );
 
     Ok(buffer)
-}
-
-#[cfg_attr(feature = "profiling", profiling::function)]
-fn recenter_scene(
-    xr_session: &openxr::Session<openxr::Vulkan>,
-    xr_reference_space: &openxr::Space,
-    xr_view_space: &openxr::Space,
-    last_predicted_frame_time: openxr::Time,
-    horizon_locked: bool,
-    delay: i64,
-    xr_space: &mut openxr::Space,
-) -> anyhow::Result<()> {
-    let mut view_location_pose = xr_view_space
-        .locate(
-            xr_reference_space,
-            openxr::Time::from_nanos(last_predicted_frame_time.as_nanos() - delay),
-        )?
-        .pose;
-    let quaternion =
-        cgmath::Quaternion::from(mint::Quaternion::from(view_location_pose.orientation));
-    let forward = cgmath::Vector3::new(0.0, 0.0, 1.0);
-    let look_dir = quaternion * forward;
-    let yaw = cgmath::Rad(look_dir.x.atan2(look_dir.z));
-    let clean_orientation = if horizon_locked {
-        cgmath::Quaternion::from_angle_y(yaw)
-    } else {
-        let padj = (look_dir.x * look_dir.x + look_dir.z * look_dir.z).sqrt();
-        let pitch = -cgmath::Rad(look_dir.y.atan2(padj));
-        cgmath::Quaternion::from_angle_y(yaw) * cgmath::Quaternion::from_angle_x(pitch)
-    };
-    view_location_pose.orientation = openxr::Quaternionf {
-        x: clean_orientation.v.x,
-        y: clean_orientation.v.y,
-        z: clean_orientation.v.z,
-        w: clean_orientation.s,
-    };
-    *xr_space = xr_session.create_reference_space(ReferenceSpaceType::LOCAL, view_location_pose)?;
-
-    Ok(())
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]

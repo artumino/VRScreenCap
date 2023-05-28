@@ -24,9 +24,14 @@ impl InputContext {
         let default_set =
             xr_instance.create_action_set("default", "Default controller actions", 0)?;
 
-        let right_hand = default_set.create_action("right_hand", "Right Hand Controller", &[])?;
+        let right_hand = default_set.create_action::<openxr::Posef>(
+            "right_hand",
+            "Right Hand Controller",
+            &[],
+        )?;
 
-        let left_hand = default_set.create_action("left_hand", "Left Hand Controller", &[])?;
+        let left_hand =
+            default_set.create_action::<openxr::Posef>("left_hand", "Left Hand Controller", &[])?;
 
         xr_instance.suggest_interaction_profile_bindings(
             xr_instance.string_to_path("/interaction_profiles/khr/simple_controller")?,
