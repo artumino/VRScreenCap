@@ -17,14 +17,14 @@ crate-type = ["lib", "cdylib"]
 [dependencies]
 wgpu = { git = "https://github.com/gfx-rs/wgpu.git", branch = "trunk" }
 wgpu-hal = { git = "https://github.com/gfx-rs/wgpu.git", branch = "trunk", features = ["vulkan"] }
-ash = "0.37.2"
+ash = "0.37.3"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
 bytemuck = { version = "1.13.1", features = [ "derive" ] }
 log4rs = "1.2.0"
-log = "0.4.17"
+log = "0.4.18"
 log-panics = { version = "2.1.0", features=["with-backtrace"] }
-clap = { version = "4.3.0", features=["derive"] }
+clap = { version = "4.3.1", features=["derive"] }
 thread-priority = "0.13.1"
 serde = "1.0.163"
 serde_json = "1.0.96"

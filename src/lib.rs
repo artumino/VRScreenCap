@@ -24,7 +24,6 @@ use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
 use log::error;
 use utils::commands::AppState;
 
-
 use std::{
     iter,
     num::NonZeroU32,
@@ -668,8 +667,9 @@ fn run(
                     log::error!("Lost {} OpenXR events", e.lost_event_count());
                 }
                 openxr::Event::ReferenceSpaceChangePending(_) => {
+                    log::info!("Reference space change pending, recentering XR space");
                     //Reset XR space to follow runtime
-                    app_space = AppSpace::new(&xr_session)?;
+                    reset_app_space(&mut app_space, &xr_session, input_context.as_mut())?;
                 }
                 _ => {}
             }
@@ -967,6 +967,7 @@ fn run(
                     }
                     Err(err) => {
                         log::error!("Failed to process inputs: {}", err);
+                        reset_app_space(&mut app_space, &xr_session, Some(input_context))?;
                     }
                 }
             }
@@ -1075,6 +1076,18 @@ fn run(
         profiling::finish_frame!();
     }
 
+    Ok(())
+}
+
+fn reset_app_space(
+    app_space: &mut AppSpace,
+    xr_session: &openxr::Session<openxr::Vulkan>,
+    input_context: Option<&mut InputContext>,
+) -> Result<(), anyhow::Error> {
+    *app_space = AppSpace::new(xr_session)?;
+    if let Some(input_context) = input_context {
+        input_context.reset_space();
+    };
     Ok(())
 }
 
