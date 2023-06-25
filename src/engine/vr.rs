@@ -2,13 +2,14 @@ use anyhow::{bail, Context};
 use ash::vk::{self, Handle, QueueGlobalPriorityKHR};
 
 use openxr as xr;
-use wgpu::{Device, Extent3d};
+use wgpu::Device;
 use wgpu_hal as hal;
 
+use crate::engine::swapchain::SwapchainCreationInfo;
+
 use super::{
-    formats::InternalColorFormat,
-    texture::{Texture2D, Unbound},
-    WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION,
+    formats::InternalColorFormat, swapchain::Swapchain, WgpuLoader, WgpuRunner,
+    TARGET_VULKAN_VERSION,
 };
 
 pub struct OpenXRContext {
@@ -22,6 +23,7 @@ pub struct OpenXRContext {
 pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 pub const VIEW_COUNT: u32 = 2;
 pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8Unorm;
+pub const SWAPCHAIN_DEPTH_FORMAT: InternalColorFormat = InternalColorFormat::Depth16Unorm;
 
 #[cfg(debug_assertions)]
 pub fn openxr_layers() -> [&'static str; 0] {
@@ -49,9 +51,12 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
 
     let mut enabled_extensions = openxr::ExtensionSet::default();
     enabled_extensions.khr_vulkan_enable2 = true;
+    enabled_extensions.khr_composition_layer_depth =
+        available_extensions.khr_composition_layer_depth;
 
     #[cfg(target_os = "android")]
     {
+        assert!(available_extensions.khr_android_create_instance);
         enabled_extensions.khr_android_create_instance = true;
     }
     log::info!("Enabled extensions: {:?}", enabled_extensions);
@@ -108,7 +113,6 @@ fn instance_flags() -> hal::InstanceFlags {
 }
 
 impl WgpuLoader for OpenXRContext {
-    #[cfg_attr(feature = "profiling", profiling::function)]
     fn load_wgpu(&mut self) -> anyhow::Result<super::WgpuContext> {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
@@ -217,6 +221,7 @@ impl WgpuLoader for OpenXRContext {
                 vk_instance.clone(),
                 vk_target_version,
                 0,
+                None,
                 instance_extensions,
                 flags,
                 false,
@@ -331,7 +336,7 @@ impl WgpuLoader for OpenXRContext {
             device: wgpu_device,
             physical_device: wgpu_adapter,
             queue: wgpu_queue,
-            queue_index: family_info.queue_family_index,
+            family_queue_index: family_info.queue_family_index,
             vk_entry,
             vk_device_ptr,
             vk_instance_ptr: vk_instance.handle().as_raw(),
@@ -352,11 +357,7 @@ impl OpenXRContext {
         &self,
         xr_session: &openxr::Session<openxr::Vulkan>,
         device: &Device,
-    ) -> anyhow::Result<(
-        openxr::Swapchain<openxr::Vulkan>,
-        vk::Extent2D,
-        Vec<Texture2D<Unbound>>,
-    )> {
+    ) -> anyhow::Result<(Swapchain, Option<Swapchain>, vk::Extent2D)> {
         log::info!("Creating OpenXR swapchain");
 
         // Fetch the views we need to render to (the eye screens on the HMD)
@@ -371,45 +372,40 @@ impl OpenXRContext {
             width: views[0].recommended_image_rect_width,
             height: views[0].recommended_image_rect_height,
         };
-        let vk_format: vk::Format = vk::Format::B8G8R8A8_SRGB;
-        let xr_swapchain = xr_session.create_swapchain(&openxr::SwapchainCreateInfo {
-            create_flags: openxr::SwapchainCreateFlags::EMPTY,
-            usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
-                | openxr::SwapchainUsageFlags::SAMPLED,
-            format: vk_format.as_raw() as _,
-            sample_count: 1,
-            width: resolution.width,
-            height: resolution.height,
-            face_count: 1,
-            array_size: VIEW_COUNT,
-            mip_count: 1,
-        })?;
 
-        // Create image views for the swapchain
-        let swapcain_textures: Vec<_> = xr_swapchain
-            .enumerate_images()?
-            .into_iter()
-            .map(vk::Image::from_raw)
-            .filter_map(|image| {
-                Texture2D::<Unbound>::from_vk_image(
-                    "OpenXR swapchain image",
-                    device,
-                    image,
-                    Extent3d {
-                        width: resolution.width,
-                        height: resolution.height,
-                        depth_or_array_layers: VIEW_COUNT,
-                    },
-                    SWAPCHAIN_COLOR_FORMAT,
-                )
-                .ok()
-            })
-            .collect();
+        //TODO: Enumerate swapchain formats and pick the best one, remember that WGPU gamma corrects everything
+        let color_swapchain = Swapchain::new(
+            "OpenXR Swapchain Image",
+            xr_session,
+            device,
+            SwapchainCreationInfo {
+                resolution,
+                vk_format: vk::Format::B8G8R8A8_SRGB,
+                texture_format: SWAPCHAIN_COLOR_FORMAT,
+                usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                    | openxr::SwapchainUsageFlags::SAMPLED,
+                view_count: VIEW_COUNT,
+            },
+        )?;
 
-        if swapcain_textures.is_empty() {
+        if color_swapchain.is_empty() {
             return Err(anyhow::anyhow!("No swapchain images"));
         }
 
-        Ok((xr_swapchain, resolution, swapcain_textures))
+        let depth_swapchain = Swapchain::new(
+            "Depth Swapchain Image",
+            xr_session,
+            device,
+            SwapchainCreationInfo {
+                resolution,
+                vk_format: vk::Format::D16_UNORM,
+                texture_format: SWAPCHAIN_DEPTH_FORMAT,
+                usage_flags: openxr::SwapchainUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                    | openxr::SwapchainUsageFlags::SAMPLED,
+                view_count: VIEW_COUNT,
+            },
+        )?;
+
+        Ok((color_swapchain, Some(depth_swapchain), resolution))
     }
 }

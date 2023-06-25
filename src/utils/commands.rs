@@ -2,6 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use tray_item::TrayItem;
 
+use crate::loaders::StereoMode;
+
 use super::tray;
 
 #[derive(Clone)]
@@ -10,6 +12,7 @@ pub(crate) enum AppCommands {
     Reload,
     Recenter(bool),
     ToggleSettings(ToggleSetting),
+    SetStereoMode(StereoMode),
 }
 
 #[derive(Clone)]

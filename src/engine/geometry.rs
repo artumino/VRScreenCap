@@ -152,10 +152,9 @@ impl Mesh {
                 tex_coords: [mesh.texcoords[i * 2], mesh.texcoords[i * 2 + 1]],
             })
             .collect::<Vec<_>>();
-        let indices = mesh.indices.clone();
-        let (vertex_buffer, index_buffer) = Mesh::get_buffers(device, &vertices, &indices);
+        let (vertex_buffer, index_buffer) = Mesh::get_buffers(device, &vertices, &mesh.indices);
         Mesh {
-            num_indeces: indices.len() as u32,
+            num_indeces: mesh.indices.len() as u32,
             vertex_buffer,
             index_buffer,
         }
