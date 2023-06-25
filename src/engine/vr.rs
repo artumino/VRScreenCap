@@ -221,6 +221,7 @@ impl WgpuLoader for OpenXRContext {
                 vk_instance.clone(),
                 vk_target_version,
                 0,
+                None,
                 instance_extensions,
                 flags,
                 false,
