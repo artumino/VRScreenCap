@@ -122,7 +122,7 @@ fn run(
     // let wgpu define it.
 
     let mut stereo_mode = StereoMode::Mono;
-    let default_stereo_mode = StereoMode::Mono; // Not configurable for now
+    let mut default_stereo_mode = StereoMode::Mono; // Not configurable for now
     let mut current_loader = None;
 
     let mut loaders: Vec<Box<dyn Loader>> = vec![
@@ -1042,6 +1042,10 @@ fn run(
                         screen_invalidated = true;
                     }
                 },
+                Some(AppCommands::SetStereoMode(stereo_mode)) => {
+                    default_stereo_mode = stereo_mode.clone();
+                    screen_invalidated = true;
+                }
                 _ => {}
             }
         }

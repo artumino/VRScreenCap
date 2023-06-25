@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use tray_item::{IconSource, TrayItem};
 
-use crate::utils::commands::ToggleSetting;
+use crate::{loaders::StereoMode, utils::commands::ToggleSetting};
 
 use super::commands::{AppCommands, AppState};
 
@@ -25,7 +25,7 @@ fn add_tray_message_sender(
 fn add_all_tray_message_senders(
     tray_state: &Arc<Mutex<AppState>>,
     tray: &mut TrayItem,
-    entries: Vec<(&'static str, &'static AppCommands)>,
+    entries: &[(&'static str, &'static AppCommands)],
 ) -> anyhow::Result<()> {
     for (entry_name, message) in entries {
         add_tray_message_sender(tray_state, tray, entry_name, message)?;
@@ -42,7 +42,7 @@ pub(crate) fn build_tray(tray_state: &Arc<Mutex<AppState>>) -> anyhow::Result<Tr
     add_all_tray_message_senders(
         tray_state,
         &mut tray,
-        vec![
+        &[
             (
                 "Swap Eyes",
                 &AppCommands::ToggleSettings(ToggleSetting::SwapEyes),
@@ -56,11 +56,24 @@ pub(crate) fn build_tray(tray_state: &Arc<Mutex<AppState>>) -> anyhow::Result<Tr
         ],
     )?;
 
+    tray.add_label("Desktop Settings")?;
+    add_all_tray_message_senders(
+        tray_state,
+        &mut tray,
+        &[
+            ("Mono", &AppCommands::SetStereoMode(StereoMode::Mono)),
+            ("Half-SBS", &AppCommands::SetStereoMode(StereoMode::Sbs)),
+            ("Full-SBS", &AppCommands::SetStereoMode(StereoMode::FullSbs)),
+            ("Half-TAB", &AppCommands::SetStereoMode(StereoMode::Tab)),
+            ("Full-TAB", &AppCommands::SetStereoMode(StereoMode::FullTab)),
+        ],
+    )?;
+
     tray.add_label("Actions")?;
     add_all_tray_message_senders(
         tray_state,
         &mut tray,
-        vec![
+        &[
             ("Reload Screen", &AppCommands::Reload),
             ("Recenter", &AppCommands::Recenter(true)),
             ("Recenter w/ Pitch", &AppCommands::Recenter(false)),
