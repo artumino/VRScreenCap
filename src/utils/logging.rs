@@ -41,31 +41,23 @@ pub fn setup_logging() -> anyhow::Result<()> {
     let config = Config::builder()
         .appender(Appender::builder().build("logfile", Box::new(logfile)))
         .appender(Appender::builder().build("stdout", Box::new(stdout)))
-        .logger(
+        .loggers([
             Logger::builder()
                 .appender("logfile")
                 .build("panic", LevelFilter::Info),
-        )
-        .logger(
             Logger::builder()
                 .appender("logfile")
                 .build("vr-screen-cap", LevelFilter::Info),
-        )
-        .logger(
             Logger::builder()
                 .appender("logfile")
                 .build("vr_screen_cap_core", LevelFilter::Info),
-        )
-        .logger(
             Logger::builder()
                 .appender("logfile")
                 .build("wgpu", LevelFilter::Warn),
-        )
-        .logger(
             Logger::builder()
                 .appender("logfile")
                 .build("wgpu-hal", LevelFilter::Warn),
-        )
+        ])
         .build(Root::builder().appender("stdout").build(LevelFilter::Info))?;
 
     log4rs::init_config(config)?;

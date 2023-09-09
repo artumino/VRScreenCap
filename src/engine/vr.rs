@@ -1,3 +1,5 @@
+use std::ffi::c_char;
+
 use anyhow::{bail, Context};
 use ash::vk::{self, Handle, QueueGlobalPriorityKHR};
 
@@ -8,7 +10,7 @@ use wgpu_hal as hal;
 use crate::engine::swapchain::SwapchainCreationInfo;
 
 use super::{
-    formats::InternalColorFormat, swapchain::Swapchain, WgpuLoader, WgpuRunner,
+    formats::InternalColorFormat, swapchain::Swapchain, WgpuContext, WgpuLoader, WgpuRunner,
     TARGET_VULKAN_VERSION,
 };
 
@@ -25,12 +27,12 @@ pub const VIEW_COUNT: u32 = 2;
 pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8Unorm;
 pub const SWAPCHAIN_DEPTH_FORMAT: InternalColorFormat = InternalColorFormat::Depth16Unorm;
 
-#[cfg(debug_assertions)]
+#[cfg(not(dist))]
 pub fn openxr_layers() -> [&'static str; 0] {
     [] //TODO: ["VK_LAYER_KHRONOS_validation"]
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(dist)]
 pub fn openxr_layers() -> [&'static str; 0] {
     []
 }
@@ -102,14 +104,87 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     })
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(dist)]
 fn instance_flags() -> hal::InstanceFlags {
     hal::InstanceFlags::empty()
 }
 
-#[cfg(debug_assertions)]
+#[cfg(not(dist))]
 fn instance_flags() -> hal::InstanceFlags {
-    hal::InstanceFlags::empty() | hal::InstanceFlags::VALIDATION | hal::InstanceFlags::DEBUG
+    hal::InstanceFlags::VALIDATION | hal::InstanceFlags::DEBUG
+}
+
+#[cfg(not(dist))]
+fn vulkan_layers() -> Vec<*const c_char> {
+    let layer_names: Vec<std::ffi::CString> =
+        vec![std::ffi::CString::new("VK_LAYER_KHRONOS_validation").unwrap()];
+    layer_names
+        .iter()
+        .map(|layer_name| layer_name.as_ptr())
+        .collect()
+}
+
+#[cfg(not(dist))]
+fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreateInfoEXT> {
+    use std::ptr;
+
+    use crate::utils::validation;
+
+    Some(vk::DebugUtilsMessengerCreateInfoEXT {
+        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        p_next: ptr::null(),
+        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+        pfn_user_callback: Some(validation::debug_callback),
+        p_user_data: ptr::null_mut(),
+    })
+}
+
+#[cfg(not(dist))]
+fn setup_debug_utils(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+) -> (
+    Option<ash::extensions::ext::DebugUtils>,
+    Option<vk::DebugUtilsMessengerEXT>,
+) {
+    let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
+    let messenger_ci = populate_debug_messenger_create_info().unwrap();
+
+    let utils_messenger = unsafe {
+        debug_utils_loader
+            .create_debug_utils_messenger(&messenger_ci, None)
+            .expect("Debug Utils Callback")
+    };
+
+    (Some(debug_utils_loader), Some(utils_messenger))
+}
+
+#[cfg(dist)]
+fn vulkan_layers() -> Vec<*const c_char> {
+    vec![]
+}
+
+#[cfg(dist)]
+fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreateInfoEXT> {
+    None
+}
+
+#[cfg(dist)]
+fn setup_debug_utils(
+    _entry: &ash::Entry,
+    _instance: &ash::Instance,
+) -> (
+    Option<ash::extensions::ext::DebugUtils>,
+    Option<vk::DebugUtilsMessengerEXT>,
+) {
+    (None, None)
 }
 
 impl WgpuLoader for OpenXRContext {
@@ -157,9 +232,19 @@ impl WgpuLoader for OpenXRContext {
         let instance_extensions_ptrs: Vec<_> =
             instance_extensions.iter().map(|x| x.as_ptr()).collect();
 
-        let create_info = vk::InstanceCreateInfo::builder()
+        let instance_layers = vulkan_layers();
+
+        // This create info used to debug issues in vk::createInstance and vk::destroyInstance.
+        let mut debug_info = populate_debug_messenger_create_info();
+
+        let mut create_info = vk::InstanceCreateInfo::builder()
             .application_info(&vk_app_info)
-            .enabled_extension_names(&instance_extensions_ptrs);
+            .enabled_extension_names(&instance_extensions_ptrs)
+            .enabled_layer_names(&instance_layers);
+
+        if let Some(debug_info) = &mut debug_info {
+            create_info = create_info.push_next(debug_info);
+        }
 
         let vk_instance = unsafe {
             let vk_instance = self
@@ -179,6 +264,8 @@ impl WgpuLoader for OpenXRContext {
         };
 
         log::info!("Successfully created Vulkan instance");
+
+        let (debug_utils, debug_messenger) = setup_debug_utils(&vk_entry, &vk_instance);
 
         let vk_physical_device = vk::PhysicalDevice::from_raw(unsafe {
             self.instance
@@ -341,7 +428,21 @@ impl WgpuLoader for OpenXRContext {
             vk_device_ptr,
             vk_instance_ptr: vk_instance.handle().as_raw(),
             vk_phys_device_ptr: vk_physical_device.as_raw(),
+            debug_messenger,
+            debug_utils,
         })
+    }
+}
+
+impl Drop for WgpuContext {
+    fn drop(&mut self) {
+        if let (Some(debug_messenger), Some(debug_utils_loader)) =
+            (self.debug_messenger, self.debug_utils.take())
+        {
+            unsafe {
+                debug_utils_loader.destroy_debug_utils_messenger(debug_messenger, None);
+            }
+        }
     }
 }
 

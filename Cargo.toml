@@ -71,6 +71,7 @@ default = ["renderdoc"]
 dhat-heap = ["dep:dhat"]
 renderdoc = ["dep:renderdoc"]
 profiling = ["dep:profiling", "dep:tracy-client"]
+dist = []
 
 # ANDROID
 [package.metadata.android]

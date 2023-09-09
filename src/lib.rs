@@ -52,7 +52,7 @@ const AMBIENT_BLUR_TEMPORAL_SAMPLES: u32 = 16;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-pub fn launch() -> anyhow::Result<()> {
+pub fn launch() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
@@ -64,28 +64,57 @@ pub fn launch() -> anyhow::Result<()> {
 
     #[cfg(feature = "renderdoc")]
     let _rd: renderdoc::RenderDoc<renderdoc::V110> =
-        renderdoc::RenderDoc::new().context("Unable to connect to renderdoc")?;
+        match renderdoc::RenderDoc::new().context("Unable to connect to renderdoc") {
+            Ok(rd) => rd,
+            Err(err) => {
+                log::error!("Failed to connect to renderdoc: {}", err);
+                return;
+            }
+        };
 
     #[cfg(not(target_os = "android"))]
-    utils::logging::setup_logging()?;
+    if let Err(err) = utils::logging::setup_logging() {
+        log::error!("Failed to setup logging: {}", err);
+    }
 
     try_elevate_priority();
 
-    let app = AppContext::new()?;
-    let mut xr_context = enable_xr_runtime()?;
-    let wgpu_context = xr_context.load_wgpu()?;
+    let app = match AppContext::new() {
+        Ok(app) => app,
+        Err(err) => {
+            log::error!("Failed to create app context: {}", err);
+            return;
+        }
+    };
+
+    let mut xr_context = match enable_xr_runtime() {
+        Ok(xr_context) => xr_context,
+        Err(err) => {
+            log::error!("Failed to enable OpenXR runtime: {}", err);
+            return;
+        }
+    };
+
+    let wgpu_context = match xr_context.load_wgpu() {
+        Ok(wgpu_context) => wgpu_context,
+        Err(err) => {
+            log::error!("Failed to load WGPU: {}", err);
+            return;
+        }
+    };
 
     let mut config_context = config::ConfigContext::try_setup().unwrap_or(None);
 
     log::info!("Finished initial setup, running main loop");
-    run(
+
+    if let Err(err) = run(
         &mut xr_context,
         &wgpu_context,
         &app.state,
         &mut config_context,
-    )?;
-
-    Ok(())
+    ) {
+        log::error!("VRScreenCap closed unexpectedly with an error: {}", err);
+    }
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -1388,7 +1417,5 @@ fn try_loader(
 
 #[cfg_attr(target_os = "android", ndk_glue::main(backtrace = "full"))]
 pub fn main() {
-    if let Err(err) = launch() {
-        log::error!("VRScreenCap closed unexpectedly with an error: {}", err);
-    }
+    launch();
 }

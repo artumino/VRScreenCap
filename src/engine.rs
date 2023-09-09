@@ -26,6 +26,8 @@ pub struct WgpuContext {
     pub device: wgpu::Device,
     pub physical_device: wgpu::Adapter,
     pub queue: wgpu::Queue,
+    debug_utils: Option<ash::extensions::ext::DebugUtils>,
+    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
 pub trait WgpuLoader {
