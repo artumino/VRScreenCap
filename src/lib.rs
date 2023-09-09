@@ -97,7 +97,7 @@ fn try_elevate_priority() {
 
     #[cfg(target_os = "windows")]
     {
-        if !unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) }.as_bool() {
+        if unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) }.is_err() {
             log::warn!("Failed to set process priority to max!");
         }
     }
@@ -1249,7 +1249,7 @@ fn upload_camera_uniforms(
     camera_buffer: &wgpu::Buffer,
 ) -> Result<(), anyhow::Error> {
     for (view_idx, view) in views.iter().enumerate() {
-        let mut eye = cameras
+        let eye = cameras
             .get_mut(view_idx)
             .context("Cannot borrow camera as mutable")?;
         eye.entity.position.x = view.pose.position.x;
