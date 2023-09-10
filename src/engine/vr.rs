@@ -63,6 +63,17 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     }
     log::info!("Enabled extensions: {:?}", enabled_extensions);
 
+    #[cfg(not(dist))]
+    {
+        for layer in entry.enumerate_layers()? {
+            log::info!(
+                "[OPENXR] Found layer: {} {:?}",
+                layer.layer_name,
+                layer.spec_version
+            );
+        }
+    }
+
     log::info!("Loading OpenXR Runtime...");
     let instance = entry.create_instance(
         &openxr::ApplicationInfo {
@@ -116,11 +127,14 @@ fn instance_flags() -> hal::InstanceFlags {
 
 #[cfg(not(dist))]
 fn vulkan_layers() -> Vec<*const c_char> {
-    let layer_names: Vec<std::ffi::CString> =
-        vec![std::ffi::CString::new("VK_LAYER_KHRONOS_validation").unwrap()];
+    use std::ffi::CStr;
+
+    let layer_names = [CStr::from_bytes_with_nul(
+        b"VK_LAYER_KHRONOS_validation\0",
+    ).unwrap()];
     layer_names
         .iter()
-        .map(|layer_name| layer_name.as_ptr())
+        .map(|raw_name| raw_name.as_ptr())
         .collect()
 }
 
@@ -231,6 +245,17 @@ impl WgpuLoader for OpenXRContext {
         log::info!("Requested instance extensions: {:?}", instance_extensions);
         let instance_extensions_ptrs: Vec<_> =
             instance_extensions.iter().map(|x| x.as_ptr()).collect();
+
+        #[cfg(not(dist))]
+        {
+            for layer in vk_entry.enumerate_instance_layer_properties()? {
+                log::info!(
+                    "[VULKAN] Found layer: {} {:?}",
+                    String::from_utf8_lossy(unsafe { &*(layer.layer_name.as_ref() as *const _  as *const [u8]) }),
+                    layer.spec_version
+                );
+            }
+        }
 
         let instance_layers = vulkan_layers();
 
