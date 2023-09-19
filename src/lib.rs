@@ -1,6 +1,15 @@
 #[cfg(target_os = "windows")]
-use ::windows::Win32::System::Threading::{
-    GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS,
+use ::windows::Win32::{
+    Foundation::GetLastError,
+    Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES,
+        SE_INC_BASE_PRIORITY_NAME, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+        TOKEN_QUERY,
+    },
+    System::Threading::{GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS},
+    System::Threading::{
+        GetCurrentThread, OpenProcessToken, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+    },
 };
 use anyhow::Context;
 
@@ -53,6 +62,13 @@ const AMBIENT_BLUR_TEMPORAL_SAMPLES: u32 = 16;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub fn launch() {
+    #[cfg(not(target_os = "android"))]
+    if let Err(err) = utils::logging::setup_logging() {
+        log::error!("Failed to setup logging: {}", err);
+    }
+
+    try_elevate_priority();
+
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
@@ -71,13 +87,6 @@ pub fn launch() {
                 return;
             }
         };
-
-    #[cfg(not(target_os = "android"))]
-    if let Err(err) = utils::logging::setup_logging() {
-        log::error!("Failed to setup logging: {}", err);
-    }
-
-    try_elevate_priority();
 
     let app = match AppContext::new() {
         Ok(app) => app,
@@ -126,9 +135,75 @@ fn try_elevate_priority() {
 
     #[cfg(target_os = "windows")]
     {
+        try_elevate_privileges();
+
         if unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) }.is_err() {
             log::warn!("Failed to set process priority to max!");
         }
+
+        if let Err(err) = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) }
+        {
+            log::warn!("Failed to set thread priority to max! {}", err);
+        }
+    }
+}
+
+// Tries to enable SE_INC_BASE_PRIORITY_NAME privilege, allows to set vulkan global queue priority
+#[cfg(target_os = "windows")]
+fn try_elevate_privileges() {
+    use std::mem::size_of;
+
+    let mut h_token = Default::default();
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut h_token,
+        )
+    }
+    .is_ok()
+    {
+        let privs = LUID_AND_ATTRIBUTES {
+            Luid: Default::default(),
+            Attributes: SE_PRIVILEGE_ENABLED,
+        };
+        let mut tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [privs; 1],
+        };
+
+        if unsafe {
+            LookupPrivilegeValueW(None, SE_INC_BASE_PRIORITY_NAME, &mut tp.Privileges[0].Luid)
+        }
+        .is_err()
+        {
+            log::warn!("Failed to lookup SE_INC_BASE_PRIORITY_NAME privilege");
+            return;
+        }
+
+        if unsafe {
+            AdjustTokenPrivileges(
+                h_token,
+                false,
+                Some(&tp),
+                size_of::<TOKEN_PRIVILEGES>() as _,
+                None,
+                None,
+            )
+        }
+        .is_err()
+        {
+            log::warn!("Failed to adjust SE_INC_BASE_PRIORITY privilege");
+            return;
+        }
+
+        if unsafe { GetLastError() }.is_err() {
+            log::warn!("Failed to request SE_INC_BASE_PRIORITY privilege, if you want VRScreenCap to run at max priority, please run it as administrator");
+        } else {
+            log::info!("Running in high priority mode");
+        }
+    } else {
+        log::warn!("Failed to request SE_INC_BASE_PRIORITY privilege, if you want VRScreenCap to run at max priority, please run it as administrator");
     }
 }
 

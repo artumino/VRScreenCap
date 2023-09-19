@@ -6,6 +6,7 @@ use ash::vk::{self, Handle, QueueGlobalPriorityKHR};
 use openxr as xr;
 use wgpu::Device;
 use wgpu_hal as hal;
+use xr::SystemId;
 
 use crate::engine::swapchain::SwapchainCreationInfo;
 
@@ -129,9 +130,7 @@ fn instance_flags() -> hal::InstanceFlags {
 fn vulkan_layers() -> Vec<*const c_char> {
     use std::ffi::CStr;
 
-    let layer_names = [CStr::from_bytes_with_nul(
-        b"VK_LAYER_KHRONOS_validation\0",
-    ).unwrap()];
+    let layer_names = [CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0").unwrap()];
     layer_names
         .iter()
         .map(|raw_name| raw_name.as_ptr())
@@ -251,7 +250,9 @@ impl WgpuLoader for OpenXRContext {
             for layer in vk_entry.enumerate_instance_layer_properties()? {
                 log::info!(
                     "[VULKAN] Found layer: {} {:?}",
-                    String::from_utf8_lossy(unsafe { &*(layer.layer_name.as_ref() as *const _  as *const [u8]) }),
+                    String::from_utf8_lossy(unsafe {
+                        &*(layer.layer_name.as_ref() as *const _ as *const [u8])
+                    }),
                     layer.spec_version
                 );
             }
@@ -346,64 +347,29 @@ impl WgpuLoader for OpenXRContext {
 
         log::info!("Created WGPU-HAL instance and adapter");
 
-        //TODO actually check if the extensions are available and avoid using them in the loaders
-        let mut device_extensions = hal_exposed_adapter
-            .adapter
-            .required_device_extensions(wgpu_features);
-
-        #[cfg(target_os = "windows")]
-        device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
-
-        log::info!("Requested device extensions: {:?}", device_extensions);
-
-        let family_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(queue_family_index)
-            .queue_priorities(&[1.0])
-            .push_next(
-                &mut vk::DeviceQueueGlobalPriorityCreateInfoKHR::builder()
-                    .global_priority(QueueGlobalPriorityKHR::REALTIME_EXT),
-            )
-            .build();
-
-        let device_extensions_ptrs = device_extensions
-            .iter()
-            .map(|x| x.as_ptr())
-            .collect::<Vec<_>>();
-
-        let mut enabled_features = hal_exposed_adapter
-            .adapter
-            .physical_device_features(&device_extensions, wgpu_features);
-
-        let device_create_info = enabled_features
-            .add_to_device_create_builder(
-                vk::DeviceCreateInfo::builder()
-                    .enabled_extension_names(&device_extensions_ptrs)
-                    .queue_create_infos(&[family_info])
-                    .push_next(&mut vk::PhysicalDeviceMultiviewFeatures {
-                        multiview: vk::TRUE,
-                        ..Default::default()
-                    }),
-            )
-            .build();
-
-        let vk_device = {
-            unsafe {
-                let vk_device = self
-                    .instance
-                    .create_vulkan_device(
-                        self.system,
-                        std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
-                        vk_physical_device.as_raw() as _,
-                        &device_create_info as *const _ as *const _,
-                    )
-                    .context("XR error creating Vulkan device")?
-                    .map_err(vk::Result::from_raw)
-                    .context("Vulkan error creating Vulkan device")?;
-
-                log::info!("Creating ash vulkan device device from native");
-                ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
-            }
+        let device_create_info = VkDeviceCreateInfo {
+            xr_instance: &self.instance.clone(),
+            system_id: self.system,
+            hal_exposed_adapter: &hal_exposed_adapter,
+            wgpu_features,
+            queue_family_index,
+            vk_entry: &vk_entry,
+            vk_physical_device,
+            vk_instance: &vk_instance,
         };
+
+        let mut global_queue_priority = vk::DeviceQueueGlobalPriorityCreateInfoKHR::builder()
+            .global_priority(QueueGlobalPriorityKHR::HIGH);
+
+        let mut device_creation_result =
+            create_vk_device(device_create_info, Some(&mut global_queue_priority));
+
+        if device_creation_result.is_err() {
+            log::warn!("Failed to create Vulkan device with realtime priority, trying without");
+            device_creation_result = create_vk_device(device_create_info, None);
+        }
+
+        let (device_extensions, family_info, vk_device) = device_creation_result?;
 
         let vk_device_ptr = vk_device.handle().as_raw();
         log::info!("Successfully created Vulkan device");
@@ -534,4 +500,88 @@ impl OpenXRContext {
 
         Ok((color_swapchain, Some(depth_swapchain), resolution))
     }
+}
+
+#[derive(Clone, Copy)]
+struct VkDeviceCreateInfo<'a> {
+    xr_instance: &'a openxr::Instance,
+    system_id: SystemId,
+    hal_exposed_adapter: &'a hal::ExposedAdapter<hal::vulkan::Api>,
+    wgpu_features: wgpu::Features,
+    queue_family_index: u32,
+    vk_entry: &'a ash::Entry,
+    vk_physical_device: vk::PhysicalDevice,
+    vk_instance: &'a ash::Instance,
+}
+
+fn create_vk_device<'a>(
+    create_info: VkDeviceCreateInfo<'_>,
+    global_queue_priority: Option<&'a mut vk::DeviceQueueGlobalPriorityCreateInfoKHR>,
+) -> Result<
+    (
+        Vec<&'static std::ffi::CStr>,
+        vk::DeviceQueueCreateInfoBuilder<'a>,
+        ash::Device,
+    ),
+    anyhow::Error,
+> {
+    let VkDeviceCreateInfo {
+        xr_instance,
+        system_id,
+        hal_exposed_adapter,
+        wgpu_features,
+        queue_family_index,
+        vk_entry,
+        vk_physical_device,
+        vk_instance,
+    } = create_info;
+
+    let mut device_extensions = hal_exposed_adapter
+        .adapter
+        .required_device_extensions(wgpu_features);
+    #[cfg(target_os = "windows")]
+    device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
+    log::info!("Requested device extensions: {:?}", device_extensions);
+    let mut family_info = vk::DeviceQueueCreateInfo::builder()
+        .queue_family_index(queue_family_index)
+        .queue_priorities(&[1.0]);
+
+    if let Some(global_queue_priority) = global_queue_priority {
+        family_info = family_info.push_next(global_queue_priority);
+    }
+
+    let device_extensions_ptrs = device_extensions
+        .iter()
+        .map(|x| x.as_ptr())
+        .collect::<Vec<_>>();
+    let mut enabled_features = hal_exposed_adapter
+        .adapter
+        .physical_device_features(&device_extensions, wgpu_features);
+    let mut multiview_params = vk::PhysicalDeviceMultiviewFeatures {
+        multiview: vk::TRUE,
+        ..Default::default()
+    };
+    let device_create_info = enabled_features
+        .add_to_device_create_builder(vk::DeviceCreateInfo::builder())
+        .queue_create_infos(std::slice::from_ref(&family_info))
+        .enabled_extension_names(&device_extensions_ptrs)
+        .push_next(&mut multiview_params);
+    let vk_device = {
+        unsafe {
+            let vk_device = xr_instance
+                .create_vulkan_device(
+                    system_id,
+                    std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
+                    vk_physical_device.as_raw() as _,
+                    &device_create_info as *const _ as *const _,
+                )
+                .context("XR error creating Vulkan device")?
+                .map_err(vk::Result::from_raw)
+                .context("Vulkan error creating Vulkan device")?;
+
+            log::info!("Creating ash vulkan device device from native");
+            ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
+        }
+    };
+    Ok((device_extensions, family_info, vk_device))
 }

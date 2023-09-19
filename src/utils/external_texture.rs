@@ -48,16 +48,6 @@ impl ExternalTextureInfo {
                         ExternalApi::D3D12 => vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE_KHR,
                     };
 
-                    let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
-                        .handle_type(handle_type)
-                        .handle(tex_handle);
-
-                    let allocate_info = vk::MemoryAllocateInfo::builder()
-                        .push_next(&mut import_memory_info)
-                        .memory_type_index(0);
-
-                    let allocated_memory = raw_device.allocate_memory(&allocate_info, None)?;
-
                     let mut ext_create_info =
                         vk::ExternalMemoryImageCreateInfo::builder().handle_types(handle_type);
 
@@ -79,7 +69,18 @@ impl ExternalTextureInfo {
                         .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
                     let raw_image = raw_device.create_image(&image_create_info, None)?;
+                    let img_requirements = raw_device.get_image_memory_requirements(raw_image);
 
+                    let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
+                        .handle_type(handle_type)
+                        .handle(tex_handle);
+
+                    let allocate_info = vk::MemoryAllocateInfo::builder()
+                        .push_next(&mut import_memory_info)
+                        .allocation_size(img_requirements.size)
+                        .memory_type_index(0);
+
+                    let allocated_memory = raw_device.allocate_memory(&allocate_info, None)?;
                     raw_device.bind_image_memory(raw_image, allocated_memory, 0)?;
 
                     Ok(raw_image)
