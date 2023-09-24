@@ -45,8 +45,8 @@ pub struct AppConfig {
     // Screen scaling factor (screen width in meters), default: 40.0, usage: --scale=40.0
     #[clap(short, long, value_parser, default_value_t = 40.0)]
     pub scale: f32,
-    // Wether ambient light should be used, default: false, usage: --ambient=true
-    #[clap(short, long, value_parser, default_value_t = false)]
+    // Wether ambient light should be used, default: false, usage: --ambient=false
+    #[clap(short, long, value_parser, default_value_t = true)]
     pub ambient: bool,
     // Configuration file to watch for live changes, usage: --config-file=config.json
     #[clap(short, long, value_parser)]
