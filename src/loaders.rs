@@ -7,10 +7,10 @@ pub mod blank_loader;
 #[cfg(target_os = "windows")]
 pub mod katanga_loader;
 
-#[cfg(any(target_os = "windows"))]
+#[cfg(target_os = "windows")]
 pub mod desktop_duplication_loader;
 
-#[cfg(any(target_os = "unix"))]
+#[cfg(target_os = "unix")]
 pub mod captrs_loader;
 
 pub struct TextureSource {

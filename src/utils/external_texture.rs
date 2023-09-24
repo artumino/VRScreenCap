@@ -4,7 +4,7 @@ use wgpu::{Device, TextureFormat};
 use wgpu_hal::{api::Vulkan, MemoryFlags, TextureDescriptor, TextureUses};
 
 use crate::{
-    conversions::vulkan_image_to_texture,
+    conversions::{build_view_formats, vulkan_image_to_texture},
     engine::{
         formats::InternalColorFormat,
         texture::{Texture2D, Unbound},
@@ -33,6 +33,7 @@ impl ExternalTextureInfo {
         &self,
         label: &str,
         device: &Device,
+        view_format: Option<InternalColorFormat>,
     ) -> anyhow::Result<Texture2D<Unbound>> {
         let tex_handle = self.actual_handle as vk::HANDLE;
         let vk_format = self.format.try_into()?;
@@ -47,16 +48,6 @@ impl ExternalTextureInfo {
                         }
                         ExternalApi::D3D12 => vk::ExternalMemoryHandleTypeFlags::D3D12_RESOURCE_KHR,
                     };
-
-                    let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
-                        .handle_type(handle_type)
-                        .handle(tex_handle);
-
-                    let allocate_info = vk::MemoryAllocateInfo::builder()
-                        .push_next(&mut import_memory_info)
-                        .memory_type_index(0);
-
-                    let allocated_memory = raw_device.allocate_memory(&allocate_info, None)?;
 
                     let mut ext_create_info =
                         vk::ExternalMemoryImageCreateInfo::builder().handle_types(handle_type);
@@ -79,7 +70,18 @@ impl ExternalTextureInfo {
                         .sharing_mode(vk::SharingMode::EXCLUSIVE);
 
                     let raw_image = raw_device.create_image(&image_create_info, None)?;
+                    let img_requirements = raw_device.get_image_memory_requirements(raw_image);
 
+                    let mut import_memory_info = vk::ImportMemoryWin32HandleInfoKHR::builder()
+                        .handle_type(handle_type)
+                        .handle(tex_handle);
+
+                    let allocate_info = vk::MemoryAllocateInfo::builder()
+                        .push_next(&mut import_memory_info)
+                        .allocation_size(img_requirements.size)
+                        .memory_type_index(0);
+
+                    let allocated_memory = raw_device.allocate_memory(&allocate_info, None)?;
                     raw_device.bind_image_memory(raw_image, allocated_memory, 0)?;
 
                     Ok(raw_image)
@@ -87,6 +89,7 @@ impl ExternalTextureInfo {
             })
         };
 
+        let view_formats = build_view_formats(view_format)?;
         let raw_image = raw_image
             .context("Failed to get hal device")?
             .context("Failed to map external texture")?;
@@ -106,7 +109,7 @@ impl ExternalTextureInfo {
                 sample_count: self.sample_count,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu_texture_format,
-                view_formats: &[],
+                view_formats: &view_formats,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
             },
             TextureDescriptor {
@@ -120,12 +123,16 @@ impl ExternalTextureInfo {
                 sample_count: self.sample_count,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu_texture_format,
-                view_formats: vec![],
+                view_formats: view_formats.clone(),
                 usage: TextureUses::RESOURCE | TextureUses::COPY_SRC,
                 memory_flags: MemoryFlags::empty(),
             },
         );
 
-        Ok(Texture2D::<Unbound>::from_wgpu(device, texture))
+        Ok(Texture2D::<Unbound>::from_wgpu(
+            device,
+            texture,
+            view_format,
+        ))
     }
 }

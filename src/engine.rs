@@ -15,8 +15,10 @@ pub mod vr;
 pub const TARGET_VULKAN_VERSION: u32 = vk::make_api_version(0, 1, 1, 0);
 
 //TODO: Actually modularize engine...
-
+// Be mindful of dropping order
 pub struct WgpuContext {
+    debug_utils: Option<ash::extensions::ext::DebugUtils>,
+    debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub vk_entry: ash::Entry,
     pub vk_instance_ptr: u64,
     pub vk_phys_device_ptr: u64,

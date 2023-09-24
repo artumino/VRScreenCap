@@ -15,7 +15,7 @@ use windows::{
         },
         System::Memory::{
             MapViewOfFile, OpenFileMappingA, UnmapViewOfFile, FILE_MAP_READ,
-            MEMORYMAPPEDVIEW_HANDLE,
+            MEMORY_MAPPED_VIEW_ADDRESS,
         },
     },
 };
@@ -32,8 +32,8 @@ use crate::{
 use super::{Loader, TextureSource};
 
 pub struct KatangaLoaderContext {
-    katanga_file_handle: HANDLE,
-    katanga_file_mapping: MEMORYMAPPEDVIEW_HANDLE,
+    katanga_file_handle: Option<HANDLE>,
+    katanga_file_mapping: Option<MEMORY_MAPPED_VIEW_ADDRESS>,
     current_address: usize,
     d3d11: Option<D3D11Context>,
     d3d12: Option<D3D12Context>,
@@ -41,21 +41,26 @@ pub struct KatangaLoaderContext {
 
 impl KatangaLoaderContext {
     fn unmap(&mut self) {
-        if self.katanga_file_mapping.is_invalid()
-            || bool::from(unsafe { UnmapViewOfFile(self.katanga_file_mapping) })
-        {
-            self.katanga_file_mapping = MEMORYMAPPEDVIEW_HANDLE::default();
+        if let Some(file_mapping) = self.katanga_file_mapping.take() {
+            if let Err(err) = unsafe { UnmapViewOfFile(file_mapping) } {
+                log::error!("Failed to unmap file view: {:?}", err);
+            }
         }
 
-        if self.katanga_file_handle.is_invalid()
-            || bool::from(unsafe { CloseHandle(self.katanga_file_handle) })
-        {
-            self.katanga_file_handle = HANDLE::default();
+        if let Some(katanga_handle) = self.katanga_file_handle.take() {
+            if !katanga_handle.is_invalid() {
+                if let Err(err) = unsafe { CloseHandle(katanga_handle) } {
+                    log::error!("Failed to close file mapping: {:?}", err);
+                }
+            }
         }
     }
 
     fn map_katanga_file(&mut self) -> anyhow::Result<()> {
-        if !self.katanga_file_handle.is_invalid() && !self.katanga_file_mapping.is_invalid() {
+        if self.katanga_file_handle.is_some()
+            && !self.katanga_file_handle.as_ref().unwrap().is_invalid()
+            && self.katanga_file_mapping.is_some()
+        {
             return Ok(());
         }
 
@@ -64,7 +69,7 @@ impl KatangaLoaderContext {
         self.katanga_file_handle = match unsafe {
             OpenFileMappingA(FILE_MAP_READ.0, false, s!("Local\\KatangaMappedFile"))
         } {
-            Ok(handle) => handle,
+            Ok(handle) => Some(handle),
             Err(_) => {
                 self.unmap();
                 bail!("Cannot open file mapping!")
@@ -72,23 +77,17 @@ impl KatangaLoaderContext {
         };
         log::trace!("Handle: {:?}", self.katanga_file_handle);
 
-        self.katanga_file_mapping = match unsafe {
+        self.katanga_file_mapping = Some(unsafe {
             MapViewOfFile(
-                self.katanga_file_handle,
+                self.katanga_file_handle.unwrap(),
                 FILE_MAP_READ,
                 0,
                 0,
                 std::mem::size_of::<usize>(),
             )
-        } {
-            Ok(handle) => handle,
-            Err(_) => {
-                self.unmap();
-                bail!("Cannot map file view!")
-            }
-        };
+        });
 
-        if self.katanga_file_mapping.is_invalid() {
+        if self.katanga_file_mapping.unwrap().Value.is_null() {
             self.unmap();
             bail!("Cannot map file view!");
         }
@@ -102,8 +101,8 @@ impl Default for KatangaLoaderContext {
         Self {
             d3d11: D3D11Context::new().ok(),
             d3d12: D3D12Context::new().ok(),
-            katanga_file_handle: HANDLE::default(),
-            katanga_file_mapping: MEMORYMAPPEDVIEW_HANDLE::default(),
+            katanga_file_handle: None,
+            katanga_file_mapping: None,
             current_address: 0,
         }
     }
@@ -229,7 +228,7 @@ impl Loader for KatangaLoaderContext {
     ) -> anyhow::Result<TextureSource> {
         self.map_katanga_file()?;
 
-        let address = unsafe { *(self.katanga_file_mapping.0 as *mut usize) };
+        let address = unsafe { *(self.katanga_file_mapping.as_ref().unwrap().Value as *mut usize) };
         self.current_address = address;
         let tex_handle = self.current_address as vk::HANDLE;
         log::info!("{:#01x}", tex_handle as usize);
@@ -250,7 +249,16 @@ impl Loader for KatangaLoaderContext {
             log::info!("Actual Handle: {:?}", self.katanga_file_handle);
         }
 
-        let internal_texture = tex_info.map_as_wgpu_texture("KatangaStream", device)?;
+        let screen_format = tex_info.format;
+        let screen_norm_format = screen_format.to_norm();
+        let view_formats = if screen_norm_format != screen_format {
+            Some(screen_norm_format)
+        } else {
+            None
+        };
+
+        let internal_texture =
+            tex_info.map_as_wgpu_texture("KatangaStream", device, view_formats)?;
 
         Ok(TextureSource {
             texture: internal_texture,
@@ -262,11 +270,15 @@ impl Loader for KatangaLoaderContext {
 
     #[cfg_attr(feature = "profiling", profiling::function)]
     fn is_invalid(&self) -> bool {
-        if self.katanga_file_mapping.is_invalid() || self.katanga_file_handle.is_invalid() {
+        if self.katanga_file_mapping.is_none()
+            || self.katanga_file_handle.is_none()
+            || self.katanga_file_handle.as_ref().unwrap().is_invalid()
+            || self.katanga_file_mapping.as_ref().unwrap().Value.is_null()
+        {
             return true;
         }
 
-        let address = unsafe { *(self.katanga_file_mapping.0 as *mut usize) };
+        let address = unsafe { *(self.katanga_file_mapping.as_ref().unwrap().Value as *mut usize) };
         self.current_address != address
     }
 

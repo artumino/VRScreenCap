@@ -1,6 +1,15 @@
 #[cfg(target_os = "windows")]
-use ::windows::Win32::System::Threading::{
-    GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS,
+use ::windows::Win32::{
+    Foundation::GetLastError,
+    Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES,
+        SE_INC_BASE_PRIORITY_NAME, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+        TOKEN_QUERY,
+    },
+    System::Threading::{GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS},
+    System::Threading::{
+        GetCurrentThread, OpenProcessToken, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+    },
 };
 use anyhow::Context;
 
@@ -14,10 +23,7 @@ use engine::{
     space::AppSpace,
     swapchain::Swapchain,
     texture::{Bound, RoundRobinTextureBuffer, Texture2D, Unbound},
-    vr::{
-        enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, SWAPCHAIN_DEPTH_FORMAT,
-        VIEW_COUNT, VIEW_TYPE,
-    },
+    vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader,
 };
 use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
@@ -52,7 +58,14 @@ const AMBIENT_BLUR_TEMPORAL_SAMPLES: u32 = 16;
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
-pub fn launch() -> anyhow::Result<()> {
+pub fn launch() {
+    #[cfg(not(target_os = "android"))]
+    if let Err(err) = utils::logging::setup_logging() {
+        log::error!("Failed to setup logging: {}", err);
+    }
+
+    try_elevate_priority();
+
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
 
@@ -64,28 +77,50 @@ pub fn launch() -> anyhow::Result<()> {
 
     #[cfg(feature = "renderdoc")]
     let _rd: renderdoc::RenderDoc<renderdoc::V110> =
-        renderdoc::RenderDoc::new().context("Unable to connect to renderdoc")?;
+        match renderdoc::RenderDoc::new().context("Unable to connect to renderdoc") {
+            Ok(rd) => rd,
+            Err(err) => {
+                log::error!("Failed to connect to renderdoc: {}", err);
+                return;
+            }
+        };
 
-    #[cfg(not(target_os = "android"))]
-    utils::logging::setup_logging()?;
+    let app = match AppContext::new() {
+        Ok(app) => app,
+        Err(err) => {
+            log::error!("Failed to create app context: {}", err);
+            return;
+        }
+    };
 
-    try_elevate_priority();
+    let mut xr_context = match enable_xr_runtime() {
+        Ok(xr_context) => xr_context,
+        Err(err) => {
+            log::error!("Failed to enable OpenXR runtime: {}", err);
+            return;
+        }
+    };
 
-    let app = AppContext::new()?;
-    let mut xr_context = enable_xr_runtime()?;
-    let wgpu_context = xr_context.load_wgpu()?;
+    let wgpu_context = match xr_context.load_wgpu() {
+        Ok(wgpu_context) => wgpu_context,
+        Err(err) => {
+            log::error!("Failed to load WGPU: {}", err);
+            return;
+        }
+    };
 
     let mut config_context = config::ConfigContext::try_setup().unwrap_or(None);
 
     log::info!("Finished initial setup, running main loop");
-    run(
+
+    if let Err(err) = run(
         &mut xr_context,
         &wgpu_context,
         &app.state,
         &mut config_context,
-    )?;
-
-    Ok(())
+    ) {
+        log::error!("VRScreenCap closed unexpectedly with an error: {}", err);
+    }
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -97,9 +132,75 @@ fn try_elevate_priority() {
 
     #[cfg(target_os = "windows")]
     {
-        if !unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) }.as_bool() {
+        try_elevate_privileges();
+
+        if unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS) }.is_err() {
             log::warn!("Failed to set process priority to max!");
         }
+
+        if let Err(err) = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) }
+        {
+            log::warn!("Failed to set thread priority to max! {}", err);
+        }
+    }
+}
+
+// Tries to enable SE_INC_BASE_PRIORITY_NAME privilege, allows to set vulkan global queue priority
+#[cfg(target_os = "windows")]
+fn try_elevate_privileges() {
+    use std::mem::size_of;
+
+    let mut h_token = Default::default();
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut h_token,
+        )
+    }
+    .is_ok()
+    {
+        let privs = LUID_AND_ATTRIBUTES {
+            Luid: Default::default(),
+            Attributes: SE_PRIVILEGE_ENABLED,
+        };
+        let mut tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [privs; 1],
+        };
+
+        if unsafe {
+            LookupPrivilegeValueW(None, SE_INC_BASE_PRIORITY_NAME, &mut tp.Privileges[0].Luid)
+        }
+        .is_err()
+        {
+            log::warn!("Failed to lookup SE_INC_BASE_PRIORITY_NAME privilege");
+            return;
+        }
+
+        if unsafe {
+            AdjustTokenPrivileges(
+                h_token,
+                false,
+                Some(&tp),
+                size_of::<TOKEN_PRIVILEGES>() as _,
+                None,
+                None,
+            )
+        }
+        .is_err()
+        {
+            log::warn!("Failed to adjust SE_INC_BASE_PRIORITY privilege");
+            return;
+        }
+
+        if unsafe { GetLastError() }.is_err() {
+            log::warn!("Failed to request SE_INC_BASE_PRIORITY privilege, if you want VRScreenCap to run at max priority, please run it as administrator");
+        } else {
+            log::info!("Running in high priority mode");
+        }
+    } else {
+        log::warn!("Failed to request SE_INC_BASE_PRIORITY privilege, if you want VRScreenCap to run at max priority, please run it as administrator");
     }
 }
 
@@ -393,19 +494,13 @@ fn run(
                     module: &screen_shader,
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                        format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: SWAPCHAIN_DEPTH_FORMAT.try_into()?,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
@@ -425,19 +520,13 @@ fn run(
                     module: &screen_shader,
                     entry_point: "vignette_fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                        format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: SWAPCHAIN_DEPTH_FORMAT.try_into()?,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
@@ -458,12 +547,12 @@ fn run(
                     entry_point: "temporal_fs_main",
                     targets: &[
                         Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                            format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                             blend: Some(wgpu::BlendState::REPLACE),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
                         Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                            format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                             blend: Some(wgpu::BlendState::REPLACE),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
@@ -694,7 +783,7 @@ fn run(
             };
 
             // If we do not have a swapchain yet, create it
-            let (color_swapchain, depth_swapchain, resolution) = {
+            let (color_swapchain, resolution) = {
                 #[cfg(feature = "profiling")]
                 profiling::scope!("Swapchain Setup");
 
@@ -711,10 +800,6 @@ fn run(
             // Check which image we need to render to and wait until the compositor is
             // done with this image
             let swapchain_color_view = color_swapchain.wait_next_image()?;
-
-            let swapchain_depth_view = depth_swapchain
-                .as_mut()
-                .and_then(|depth_swapchain| depth_swapchain.wait_next_image().ok());
 
             // Must be called before any rendering is done!
             {
@@ -739,10 +824,6 @@ fn run(
                 }
 
                 color_swapchain.release_image()?;
-
-                if let Some(depth_swapchain) = depth_swapchain {
-                    depth_swapchain.release_image()?;
-                }
 
                 // Early bail
                 if let Err(err) = frame_stream.end(
@@ -786,7 +867,7 @@ fn run(
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
+                                store: wgpu::StoreOp::Store,
                             },
                         }),
                         Some(wgpu::RenderPassColorAttachment {
@@ -794,11 +875,12 @@ fn run(
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
+                                store: wgpu::StoreOp::Store,
                             },
                         }),
                     ],
                     depth_stencil_attachment: None,
+                    ..Default::default()
                 });
 
                 blit_pass.set_pipeline(&temporal_blur_pipeline);
@@ -821,19 +903,11 @@ fn run(
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: true,
+                            store: wgpu::StoreOp::Store,
                         },
                     })],
-                    depth_stencil_attachment: swapchain_depth_view.map(|depth_view| {
-                        wgpu::RenderPassDepthStencilAttachment {
-                            view: depth_view,
-                            depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
-                                store: true,
-                            }),
-                            stencil_ops: None,
-                        }
-                    }),
+                    depth_stencil_attachment: None,
+                    ..Default::default()
                 });
 
                 // Render the ambient dome
@@ -910,10 +984,6 @@ fn run(
                 profiling::scope!("Release Swapchain");
 
                 color_swapchain.release_image()?;
-
-                if let Some(depth_swapchain) = depth_swapchain {
-                    depth_swapchain.release_image()?;
-                }
             }
 
             end_framestream(
@@ -922,13 +992,11 @@ fn run(
                 FrameStreamEndInfo {
                     xr_frame_state: &xr_frame_state,
                     resolution,
-                    depth_swapchain,
                     frame_stream: &mut frame_stream,
                     xr_context,
                     xr_space: app_space.space(),
                     views: &views,
                     color_swapchain,
-                    cameras: &cameras,
                 },
             );
 
@@ -1098,13 +1166,11 @@ fn reset_app_space(
 struct FrameStreamEndInfo<'a> {
     xr_frame_state: &'a openxr::FrameState,
     resolution: &'a ash::vk::Extent2D,
-    depth_swapchain: &'a Option<Swapchain>,
     frame_stream: &'a mut openxr::FrameStream<openxr::Vulkan>,
     xr_context: &'a OpenXRContext,
     xr_space: &'a openxr::Space,
     views: &'a [openxr::View],
     color_swapchain: &'a Swapchain,
-    cameras: &'a [Camera],
 }
 fn end_framestream(
     #[cfg(feature = "profiling")] frame_begin_instant: &std::time::Instant,
@@ -1113,13 +1179,11 @@ fn end_framestream(
     let FrameStreamEndInfo {
         xr_frame_state,
         resolution,
-        depth_swapchain,
         frame_stream,
         xr_context,
         xr_space,
         views,
         color_swapchain,
-        cameras,
     } = frame_stream_end_info;
 
     log::trace!("End frame stream");
@@ -1133,37 +1197,9 @@ fn end_framestream(
         },
     };
 
-    let mut left_depth_info = depth_swapchain.as_ref().map(|depth_swapchain| {
-        openxr::CompositionLayerDepthInfoKHR::new()
-            .sub_image(
-                openxr::SwapchainSubImage::new()
-                    .swapchain(depth_swapchain.internal())
-                    .image_array_index(0)
-                    .image_rect(rect),
-            )
-            .max_depth(1.0)
-            .min_depth(0.0)
-            .far_z(cameras[0].far)
-            .near_z(cameras[0].near)
-    });
-
-    let mut right_depth_info = depth_swapchain.as_ref().map(|depth_swapchain| {
-        openxr::CompositionLayerDepthInfoKHR::new()
-            .sub_image(
-                openxr::SwapchainSubImage::new()
-                    .swapchain(depth_swapchain.internal())
-                    .image_array_index(1)
-                    .image_rect(rect),
-            )
-            .max_depth(1.0)
-            .min_depth(0.0)
-            .far_z(cameras[1].far)
-            .near_z(cameras[1].near)
-    });
-
     let proj_views = [
-        get_projection_view(0, views, color_swapchain, rect, &mut left_depth_info),
-        get_projection_view(1, views, color_swapchain, rect, &mut right_depth_info),
+        get_projection_view(0, views, color_swapchain, rect),
+        get_projection_view(1, views, color_swapchain, rect),
     ];
 
     {
@@ -1200,20 +1236,16 @@ fn get_projection_view<'a>(
     views: &[openxr::View],
     color_swapchain: &'a engine::swapchain::Swapchain,
     rect: openxr::Rect2Di,
-    depth_info: &'a mut Option<openxr::CompositionLayerDepthInfoKHR<'a, openxr::Vulkan>>,
 ) -> openxr::CompositionLayerProjectionView<'a, openxr::Vulkan> {
-    match depth_info.as_mut() {
-        Some(depth_info) => openxr::CompositionLayerProjectionView::new().push_next(depth_info),
-        None => openxr::CompositionLayerProjectionView::new(),
-    }
-    .pose(views[eye_index].pose)
-    .fov(views[eye_index].fov)
-    .sub_image(
-        openxr::SwapchainSubImage::new()
-            .swapchain(color_swapchain.internal())
-            .image_array_index(eye_index as u32)
-            .image_rect(rect),
-    )
+    openxr::CompositionLayerProjectionView::new()
+        .pose(views[eye_index].pose)
+        .fov(views[eye_index].fov)
+        .sub_image(
+            openxr::SwapchainSubImage::new()
+                .swapchain(color_swapchain.internal())
+                .image_array_index(eye_index as u32)
+                .image_rect(rect),
+        )
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -1249,7 +1281,7 @@ fn upload_camera_uniforms(
     camera_buffer: &wgpu::Buffer,
 ) -> Result<(), anyhow::Error> {
     for (view_idx, view) in views.iter().enumerate() {
-        let mut eye = cameras
+        let eye = cameras
             .get_mut(view_idx)
             .context("Cannot borrow camera as mutable")?;
         eye.entity.position.x = view.pose.position.x;
@@ -1292,10 +1324,9 @@ fn get_ambient_texture(
         StereoMode::FullSbs => 2,
         _ => 1,
     };
-    let format = SWAPCHAIN_COLOR_FORMAT.try_into()?;
     let buffer = RoundRobinTextureBuffer::new(
         (0..3)
-            .map(|idx| {
+            .flat_map(|idx| {
                 screen_texture
                     .as_render_target_with_extent(
                         format!("Ambient Texture {idx}").as_str(),
@@ -1305,10 +1336,11 @@ fn get_ambient_texture(
                                 * height_multiplier,
                             depth_or_array_layers: screen_texture.texture.depth_or_array_layers(),
                         },
-                        format,
+                        SWAPCHAIN_COLOR_FORMAT.to_norm(),
+                        None,
                         &wgpu_context.device,
                     )
-                    .bind_to_context(wgpu_context, bind_group_layout)
+                    .map(|texture| texture.bind_to_context(wgpu_context, bind_group_layout))
             })
             .collect::<Vec<_>>()
             .try_into()
@@ -1388,7 +1420,5 @@ fn try_loader(
 
 #[cfg_attr(target_os = "android", ndk_glue::main(backtrace = "full"))]
 pub fn main() {
-    if let Err(err) = launch() {
-        log::error!("VRScreenCap closed unexpectedly with an error: {}", err);
-    }
+    launch();
 }
