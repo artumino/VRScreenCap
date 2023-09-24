@@ -25,8 +25,7 @@ pub struct OpenXRContext {
 
 pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 pub const VIEW_COUNT: u32 = 2;
-pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8Unorm;
-pub const SWAPCHAIN_DEPTH_FORMAT: InternalColorFormat = InternalColorFormat::Depth16Unorm;
+pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8UnormSrgb;
 
 #[cfg(not(dist))]
 pub fn openxr_layers() -> [&'static str; 0] {
@@ -54,8 +53,6 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
 
     let mut enabled_extensions = openxr::ExtensionSet::default();
     enabled_extensions.khr_vulkan_enable2 = true;
-    enabled_extensions.khr_composition_layer_depth =
-        available_extensions.khr_composition_layer_depth;
 
     #[cfg(target_os = "android")]
     {
@@ -235,7 +232,7 @@ impl WgpuLoader for OpenXRContext {
 
         let flags = instance_flags();
 
-        let instance_extensions = <hal::api::Vulkan as hal::Api>::Instance::required_extensions(
+        let instance_extensions = <hal::api::Vulkan as hal::Api>::Instance::desired_extensions(
             &vk_entry,
             vk_target_version,
             flags,
@@ -449,7 +446,7 @@ impl OpenXRContext {
         &self,
         xr_session: &openxr::Session<openxr::Vulkan>,
         device: &Device,
-    ) -> anyhow::Result<(Swapchain, Option<Swapchain>, vk::Extent2D)> {
+    ) -> anyhow::Result<(Swapchain, vk::Extent2D)> {
         log::info!("Creating OpenXR swapchain");
 
         // Fetch the views we need to render to (the eye screens on the HMD)
@@ -472,10 +469,9 @@ impl OpenXRContext {
             device,
             SwapchainCreationInfo {
                 resolution,
-                vk_format: vk::Format::B8G8R8A8_SRGB,
-                texture_format: SWAPCHAIN_COLOR_FORMAT,
-                usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
-                    | openxr::SwapchainUsageFlags::SAMPLED,
+                format: SWAPCHAIN_COLOR_FORMAT,
+                view_format: Some(SWAPCHAIN_COLOR_FORMAT.to_norm()),
+                usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT,
                 view_count: VIEW_COUNT,
             },
         )?;
@@ -484,21 +480,7 @@ impl OpenXRContext {
             return Err(anyhow::anyhow!("No swapchain images"));
         }
 
-        let depth_swapchain = Swapchain::new(
-            "Depth Swapchain Image",
-            xr_session,
-            device,
-            SwapchainCreationInfo {
-                resolution,
-                vk_format: vk::Format::D16_UNORM,
-                texture_format: SWAPCHAIN_DEPTH_FORMAT,
-                usage_flags: openxr::SwapchainUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                    | openxr::SwapchainUsageFlags::SAMPLED,
-                view_count: VIEW_COUNT,
-            },
-        )?;
-
-        Ok((color_swapchain, Some(depth_swapchain), resolution))
+        Ok((color_swapchain, resolution))
     }
 }
 

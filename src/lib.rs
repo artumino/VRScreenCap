@@ -23,10 +23,7 @@ use engine::{
     space::AppSpace,
     swapchain::Swapchain,
     texture::{Bound, RoundRobinTextureBuffer, Texture2D, Unbound},
-    vr::{
-        enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, SWAPCHAIN_DEPTH_FORMAT,
-        VIEW_COUNT, VIEW_TYPE,
-    },
+    vr::{enable_xr_runtime, OpenXRContext, SWAPCHAIN_COLOR_FORMAT, VIEW_COUNT, VIEW_TYPE},
     WgpuContext, WgpuLoader,
 };
 use loaders::{blank_loader::BlankLoader, Loader, StereoMode};
@@ -497,19 +494,13 @@ fn run(
                     module: &screen_shader,
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                        format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: SWAPCHAIN_DEPTH_FORMAT.try_into()?,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
@@ -529,19 +520,13 @@ fn run(
                     module: &screen_shader,
                     entry_point: "vignette_fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                        format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: SWAPCHAIN_DEPTH_FORMAT.try_into()?,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: NonZeroU32::new(VIEW_COUNT),
             });
@@ -562,12 +547,12 @@ fn run(
                     entry_point: "temporal_fs_main",
                     targets: &[
                         Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                            format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                             blend: Some(wgpu::BlendState::REPLACE),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
                         Some(wgpu::ColorTargetState {
-                            format: SWAPCHAIN_COLOR_FORMAT.try_into()?,
+                            format: SWAPCHAIN_COLOR_FORMAT.to_norm().try_into()?,
                             blend: Some(wgpu::BlendState::REPLACE),
                             write_mask: wgpu::ColorWrites::ALL,
                         }),
@@ -798,7 +783,7 @@ fn run(
             };
 
             // If we do not have a swapchain yet, create it
-            let (color_swapchain, depth_swapchain, resolution) = {
+            let (color_swapchain, resolution) = {
                 #[cfg(feature = "profiling")]
                 profiling::scope!("Swapchain Setup");
 
@@ -815,10 +800,6 @@ fn run(
             // Check which image we need to render to and wait until the compositor is
             // done with this image
             let swapchain_color_view = color_swapchain.wait_next_image()?;
-
-            let swapchain_depth_view = depth_swapchain
-                .as_mut()
-                .and_then(|depth_swapchain| depth_swapchain.wait_next_image().ok());
 
             // Must be called before any rendering is done!
             {
@@ -843,10 +824,6 @@ fn run(
                 }
 
                 color_swapchain.release_image()?;
-
-                if let Some(depth_swapchain) = depth_swapchain {
-                    depth_swapchain.release_image()?;
-                }
 
                 // Early bail
                 if let Err(err) = frame_stream.end(
@@ -890,7 +867,7 @@ fn run(
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
+                                store: wgpu::StoreOp::Store,
                             },
                         }),
                         Some(wgpu::RenderPassColorAttachment {
@@ -898,11 +875,12 @@ fn run(
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
+                                store: wgpu::StoreOp::Store,
                             },
                         }),
                     ],
                     depth_stencil_attachment: None,
+                    ..Default::default()
                 });
 
                 blit_pass.set_pipeline(&temporal_blur_pipeline);
@@ -925,19 +903,11 @@ fn run(
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: true,
+                            store: wgpu::StoreOp::Store,
                         },
                     })],
-                    depth_stencil_attachment: swapchain_depth_view.map(|depth_view| {
-                        wgpu::RenderPassDepthStencilAttachment {
-                            view: depth_view,
-                            depth_ops: Some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
-                                store: true,
-                            }),
-                            stencil_ops: None,
-                        }
-                    }),
+                    depth_stencil_attachment: None,
+                    ..Default::default()
                 });
 
                 // Render the ambient dome
@@ -1014,10 +984,6 @@ fn run(
                 profiling::scope!("Release Swapchain");
 
                 color_swapchain.release_image()?;
-
-                if let Some(depth_swapchain) = depth_swapchain {
-                    depth_swapchain.release_image()?;
-                }
             }
 
             end_framestream(
@@ -1026,13 +992,11 @@ fn run(
                 FrameStreamEndInfo {
                     xr_frame_state: &xr_frame_state,
                     resolution,
-                    depth_swapchain,
                     frame_stream: &mut frame_stream,
                     xr_context,
                     xr_space: app_space.space(),
                     views: &views,
                     color_swapchain,
-                    cameras: &cameras,
                 },
             );
 
@@ -1202,13 +1166,11 @@ fn reset_app_space(
 struct FrameStreamEndInfo<'a> {
     xr_frame_state: &'a openxr::FrameState,
     resolution: &'a ash::vk::Extent2D,
-    depth_swapchain: &'a Option<Swapchain>,
     frame_stream: &'a mut openxr::FrameStream<openxr::Vulkan>,
     xr_context: &'a OpenXRContext,
     xr_space: &'a openxr::Space,
     views: &'a [openxr::View],
     color_swapchain: &'a Swapchain,
-    cameras: &'a [Camera],
 }
 fn end_framestream(
     #[cfg(feature = "profiling")] frame_begin_instant: &std::time::Instant,
@@ -1217,13 +1179,11 @@ fn end_framestream(
     let FrameStreamEndInfo {
         xr_frame_state,
         resolution,
-        depth_swapchain,
         frame_stream,
         xr_context,
         xr_space,
         views,
         color_swapchain,
-        cameras,
     } = frame_stream_end_info;
 
     log::trace!("End frame stream");
@@ -1237,37 +1197,9 @@ fn end_framestream(
         },
     };
 
-    let mut left_depth_info = depth_swapchain.as_ref().map(|depth_swapchain| {
-        openxr::CompositionLayerDepthInfoKHR::new()
-            .sub_image(
-                openxr::SwapchainSubImage::new()
-                    .swapchain(depth_swapchain.internal())
-                    .image_array_index(0)
-                    .image_rect(rect),
-            )
-            .max_depth(1.0)
-            .min_depth(0.0)
-            .far_z(cameras[0].far)
-            .near_z(cameras[0].near)
-    });
-
-    let mut right_depth_info = depth_swapchain.as_ref().map(|depth_swapchain| {
-        openxr::CompositionLayerDepthInfoKHR::new()
-            .sub_image(
-                openxr::SwapchainSubImage::new()
-                    .swapchain(depth_swapchain.internal())
-                    .image_array_index(1)
-                    .image_rect(rect),
-            )
-            .max_depth(1.0)
-            .min_depth(0.0)
-            .far_z(cameras[1].far)
-            .near_z(cameras[1].near)
-    });
-
     let proj_views = [
-        get_projection_view(0, views, color_swapchain, rect, &mut left_depth_info),
-        get_projection_view(1, views, color_swapchain, rect, &mut right_depth_info),
+        get_projection_view(0, views, color_swapchain, rect),
+        get_projection_view(1, views, color_swapchain, rect),
     ];
 
     {
@@ -1304,20 +1236,16 @@ fn get_projection_view<'a>(
     views: &[openxr::View],
     color_swapchain: &'a engine::swapchain::Swapchain,
     rect: openxr::Rect2Di,
-    depth_info: &'a mut Option<openxr::CompositionLayerDepthInfoKHR<'a, openxr::Vulkan>>,
 ) -> openxr::CompositionLayerProjectionView<'a, openxr::Vulkan> {
-    match depth_info.as_mut() {
-        Some(depth_info) => openxr::CompositionLayerProjectionView::new().push_next(depth_info),
-        None => openxr::CompositionLayerProjectionView::new(),
-    }
-    .pose(views[eye_index].pose)
-    .fov(views[eye_index].fov)
-    .sub_image(
-        openxr::SwapchainSubImage::new()
-            .swapchain(color_swapchain.internal())
-            .image_array_index(eye_index as u32)
-            .image_rect(rect),
-    )
+    openxr::CompositionLayerProjectionView::new()
+        .pose(views[eye_index].pose)
+        .fov(views[eye_index].fov)
+        .sub_image(
+            openxr::SwapchainSubImage::new()
+                .swapchain(color_swapchain.internal())
+                .image_array_index(eye_index as u32)
+                .image_rect(rect),
+        )
 }
 
 #[cfg_attr(feature = "profiling", profiling::function)]
@@ -1396,10 +1324,9 @@ fn get_ambient_texture(
         StereoMode::FullSbs => 2,
         _ => 1,
     };
-    let format = SWAPCHAIN_COLOR_FORMAT.try_into()?;
     let buffer = RoundRobinTextureBuffer::new(
         (0..3)
-            .map(|idx| {
+            .flat_map(|idx| {
                 screen_texture
                     .as_render_target_with_extent(
                         format!("Ambient Texture {idx}").as_str(),
@@ -1409,10 +1336,11 @@ fn get_ambient_texture(
                                 * height_multiplier,
                             depth_or_array_layers: screen_texture.texture.depth_or_array_layers(),
                         },
-                        format,
+                        SWAPCHAIN_COLOR_FORMAT.to_norm(),
+                        None,
                         &wgpu_context.device,
                     )
-                    .bind_to_context(wgpu_context, bind_group_layout)
+                    .map(|texture| texture.bind_to_context(wgpu_context, bind_group_layout))
             })
             .collect::<Vec<_>>()
             .try_into()

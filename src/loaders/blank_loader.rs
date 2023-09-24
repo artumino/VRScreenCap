@@ -19,6 +19,7 @@ impl Loader for BlankLoader {
             queue,
             include_bytes!("../../assets/blank_grey.png"),
             "Blank",
+            None,
         )?;
 
         Ok(super::TextureSource {

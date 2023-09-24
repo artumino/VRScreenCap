@@ -79,3 +79,19 @@ pub enum InternalColorFormat {
     Y410,
     P010,
 }
+
+impl InternalColorFormat {
+    pub const fn to_norm(self) -> InternalColorFormat {
+        match self {
+            InternalColorFormat::Etc2Rgba8UnormSrgb => InternalColorFormat::Etc2Rgba8Unorm,
+            InternalColorFormat::Etc2Rgb8UnormSrgb => InternalColorFormat::Etc2Rgb8Unorm,
+            InternalColorFormat::Bc1RgbaUnormSrgb => InternalColorFormat::Bc1RgbaUnorm,
+            InternalColorFormat::Bc2RgbaUnormSrgb => InternalColorFormat::Bc2RgbaUnorm,
+            InternalColorFormat::Bc3RgbaUnormSrgb => InternalColorFormat::Bc3RgbaUnorm,
+            InternalColorFormat::Bc7RgbaUnormSrgb => InternalColorFormat::Bc7RgbaUnorm,
+            InternalColorFormat::Bgra8UnormSrgb => InternalColorFormat::Bgra8Unorm,
+            InternalColorFormat::Rgba8UnormSrgb => InternalColorFormat::Rgba8Unorm,
+            _ => self,
+        }
+    }
+}

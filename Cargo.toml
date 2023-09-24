@@ -15,8 +15,8 @@ crate-type = ["lib", "cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = "0.17.0"
-wgpu-hal = { version = "0.17.0", features = ["vulkan"] }
+wgpu = { version = "0.17.0", git = "https://github.com/artumino/wgpu.git", branch = "fix/multiview_validation" }
+wgpu-hal = { version = "0.17.0", git = "https://github.com/artumino/wgpu.git", branch = "fix/multiview_validation", features = ["vulkan"] }
 ash = "0.37.3"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }

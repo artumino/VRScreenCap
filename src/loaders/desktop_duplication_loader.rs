@@ -70,10 +70,19 @@ impl Loader for DesktopDuplicationLoader {
             actual_handle: handle.0 as usize,
         };
 
+        let screen_format = external_texture_info.format;
+        let screen_norm_format = screen_format.to_norm();
+        let view_formats = if screen_norm_format != screen_format {
+            Some(screen_norm_format)
+        } else {
+            None
+        };
+
         let texture = external_texture_info
             .map_as_wgpu_texture(
                 format!("DD Screen Capture Texture #{}", self.screen_index).as_str(),
                 device,
+                view_formats,
             )
             .context("Cannot map desktop duplication output to WGPU texture")?;
 

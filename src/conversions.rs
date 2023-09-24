@@ -5,7 +5,6 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 
 use crate::{engine::formats::InternalColorFormat, macros::auto_map};
 
-#[cfg(target_os = "windows")]
 #[cfg_attr(feature = "profiling", profiling::function)]
 pub fn vulkan_image_to_texture(
     device: &Device,
@@ -22,6 +21,18 @@ pub fn vulkan_image_to_texture(
     };
 
     unsafe { device.create_texture_from_hal::<Vulkan>(texture, &tex_desc) }
+}
+
+#[cfg_attr(feature = "profiling", profiling::function)]
+pub fn build_view_formats(
+    view_format: Option<InternalColorFormat>,
+) -> anyhow::Result<Vec<wgpu::TextureFormat>> {
+    let view_formats = if let Some(view_format) = view_format {
+        vec![view_format.try_into()?]
+    } else {
+        vec![]
+    };
+    Ok(view_formats)
 }
 
 // Color Format Mappings

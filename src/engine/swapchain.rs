@@ -1,4 +1,5 @@
 use ash::vk::{self, Handle};
+use openxr::SwapchainUsageFlags;
 use wgpu::{Device, Extent3d};
 
 use super::{
@@ -13,8 +14,8 @@ pub struct Swapchain {
 
 pub struct SwapchainCreationInfo {
     pub resolution: vk::Extent2D,
-    pub vk_format: vk::Format,
-    pub texture_format: InternalColorFormat,
+    pub format: InternalColorFormat,
+    pub view_format: Option<InternalColorFormat>,
     pub usage_flags: openxr::SwapchainUsageFlags,
     pub view_count: u32,
 }
@@ -29,12 +30,13 @@ impl Swapchain {
     ) -> anyhow::Result<Self> {
         let SwapchainCreationInfo {
             resolution,
-            vk_format,
-            texture_format,
+            format,
+            view_format,
             usage_flags,
             view_count,
         } = creation_info;
 
+        let vk_format: vk::Format = format.try_into()?;
         let xr_swapchain = xr_session.create_swapchain(&openxr::SwapchainCreateInfo {
             create_flags: openxr::SwapchainCreateFlags::EMPTY,
             usage_flags,
@@ -61,7 +63,9 @@ impl Swapchain {
                         height: resolution.height,
                         depth_or_array_layers: view_count,
                     },
-                    texture_format,
+                    format,
+                    view_format,
+                    map_swapchain_usage(usage_flags),
                 )
                 .ok()
             })
@@ -93,4 +97,26 @@ impl Swapchain {
         self.internal_swapchain.release_image()?;
         Ok(())
     }
+}
+
+pub fn map_swapchain_usage(usage: openxr::SwapchainUsageFlags) -> wgpu::TextureUsages {
+    let mut u = wgpu::TextureUsages::empty();
+    u.set(
+        wgpu::TextureUsages::COPY_SRC,
+        usage.contains(SwapchainUsageFlags::TRANSFER_SRC),
+    );
+    u.set(
+        wgpu::TextureUsages::COPY_DST,
+        usage.contains(SwapchainUsageFlags::TRANSFER_DST),
+    );
+    u.set(
+        wgpu::TextureUsages::TEXTURE_BINDING,
+        usage.contains(SwapchainUsageFlags::SAMPLED),
+    );
+    u.set(
+        wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage.contains(SwapchainUsageFlags::COLOR_ATTACHMENT)
+            || usage.contains(SwapchainUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+    );
+    u
 }

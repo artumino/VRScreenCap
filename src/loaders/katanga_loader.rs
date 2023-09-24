@@ -47,7 +47,7 @@ impl KatangaLoaderContext {
             }
         }
 
-        if let Some(katanga_handle) = self.katanga_file_handle {
+        if let Some(katanga_handle) = self.katanga_file_handle.take() {
             if !katanga_handle.is_invalid() {
                 if let Err(err) = unsafe { CloseHandle(katanga_handle) } {
                     log::error!("Failed to close file mapping: {:?}", err);
@@ -249,7 +249,16 @@ impl Loader for KatangaLoaderContext {
             log::info!("Actual Handle: {:?}", self.katanga_file_handle);
         }
 
-        let internal_texture = tex_info.map_as_wgpu_texture("KatangaStream", device)?;
+        let screen_format = tex_info.format;
+        let screen_norm_format = screen_format.to_norm();
+        let view_formats = if screen_norm_format != screen_format {
+            Some(screen_norm_format)
+        } else {
+            None
+        };
+
+        let internal_texture =
+            tex_info.map_as_wgpu_texture("KatangaStream", device, view_formats)?;
 
         Ok(TextureSource {
             texture: internal_texture,
