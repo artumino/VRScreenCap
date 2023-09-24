@@ -38,7 +38,7 @@ anyhow = "1.0.75"
 tobj = "4.0.0"
 
 # PLATFORM DEPENDENT
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "linux")))'.dependencies]
 tray-item = "0.8.0"
 windows = { version = "0.51.1", features = [
         "Win32_System_Memory",

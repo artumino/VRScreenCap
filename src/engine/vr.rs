@@ -27,12 +27,12 @@ pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationTy
 pub const VIEW_COUNT: u32 = 2;
 pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8UnormSrgb;
 
-#[cfg(not(dist))]
+#[cfg(not(feature = "dist"))]
 pub fn openxr_layers() -> [&'static str; 0] {
     [] //TODO: ["VK_LAYER_KHRONOS_validation"]
 }
 
-#[cfg(dist)]
+#[cfg(feature = "dist")]
 pub fn openxr_layers() -> [&'static str; 0] {
     []
 }
@@ -61,7 +61,7 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     }
     log::info!("Enabled extensions: {:?}", enabled_extensions);
 
-    #[cfg(not(dist))]
+    #[cfg(not(feature = "dist"))]
     {
         for layer in entry.enumerate_layers()? {
             log::info!(
@@ -113,17 +113,17 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     })
 }
 
-#[cfg(dist)]
+#[cfg(feature = "dist")]
 fn instance_flags() -> hal::InstanceFlags {
     hal::InstanceFlags::empty()
 }
 
-#[cfg(not(dist))]
+#[cfg(not(feature = "dist"))]
 fn instance_flags() -> hal::InstanceFlags {
     hal::InstanceFlags::VALIDATION | hal::InstanceFlags::DEBUG
 }
 
-#[cfg(not(dist))]
+#[cfg(not(feature = "dist"))]
 fn vulkan_layers() -> Vec<*const c_char> {
     use std::ffi::CStr;
 
@@ -134,7 +134,7 @@ fn vulkan_layers() -> Vec<*const c_char> {
         .collect()
 }
 
-#[cfg(not(dist))]
+#[cfg(not(feature = "dist"))]
 fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreateInfoEXT> {
     use std::ptr;
 
@@ -156,7 +156,7 @@ fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreat
     })
 }
 
-#[cfg(not(dist))]
+#[cfg(not(feature = "dist"))]
 fn setup_debug_utils(
     entry: &ash::Entry,
     instance: &ash::Instance,
@@ -176,17 +176,17 @@ fn setup_debug_utils(
     (Some(debug_utils_loader), Some(utils_messenger))
 }
 
-#[cfg(dist)]
+#[cfg(feature = "dist")]
 fn vulkan_layers() -> Vec<*const c_char> {
     vec![]
 }
 
-#[cfg(dist)]
+#[cfg(feature = "dist")]
 fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreateInfoEXT> {
     None
 }
 
-#[cfg(dist)]
+#[cfg(feature = "dist")]
 fn setup_debug_utils(
     _entry: &ash::Entry,
     _instance: &ash::Instance,
@@ -242,7 +242,7 @@ impl WgpuLoader for OpenXRContext {
         let instance_extensions_ptrs: Vec<_> =
             instance_extensions.iter().map(|x| x.as_ptr()).collect();
 
-        #[cfg(not(dist))]
+        #[cfg(not(feature = "dist"))]
         {
             for layer in vk_entry.enumerate_instance_layer_properties()? {
                 log::info!(
