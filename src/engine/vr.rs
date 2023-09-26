@@ -92,7 +92,18 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     );
 
     // Request a form factor from the device (HMD, Handheld, etc.)
-    let system = instance.system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
+    let system = loop {
+        match instance.system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY) {
+            Ok(system) => break system,
+            Err(err) => {
+                if err != openxr::sys::Result::ERROR_FORM_FACTOR_UNAVAILABLE {
+                    return Err(err.into());
+                }
+            }
+        }
+        log::warn!("No HMD detected, trying again in 1 second");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    };
 
     // Check what blend mode is valid for this device (opaque vs transparent displays). We'll just
     // take the first one available!
