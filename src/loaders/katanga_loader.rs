@@ -31,7 +31,6 @@ use crate::{
 
 use super::{Loader, TextureSource};
 
-#[derive(Default)]
 pub struct KatangaLoaderContext {
     katanga_file_handle: Option<HANDLE>,
     katanga_file_mapping: Option<MEMORY_MAPPED_VIEW_ADDRESS>,
