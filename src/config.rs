@@ -48,6 +48,9 @@ pub struct AppConfig {
     // Wether ambient light should be used, default: false, usage: --ambient=false
     #[clap(short, long, value_parser, default_value_t = true)]
     pub ambient: bool,
+    // Disables all input from controllers, usefull when using hand-tracking mode from Virtual Desktop: false, usage: --no-input=false
+    #[clap(short, long, value_parser, default_value_t = false)]
+    pub no_input: bool,
     // Configuration file to watch for live changes, usage: --config-file=config.json
     #[clap(short, long, value_parser)]
     pub config_file: Option<String>,
@@ -104,7 +107,8 @@ impl Default for AppConfig {
             distance: 20.0,
             scale: 40.0,
             config_file: None,
-            ambient: false,
+            no_input: false,
+            ambient: true,
         }
     }
 }

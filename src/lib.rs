@@ -300,7 +300,7 @@ fn run(
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-    let mut screen_params = match config {
+    let mut app_config = match config {
         Some(ConfigContext {
             last_config: Some(config),
             ..
@@ -320,10 +320,10 @@ fn run(
 
     let mut screen = Screen::new(
         &wgpu_context.device,
-        -screen_params.distance,
-        screen_params.scale,
+        -app_config.distance,
+        app_config.scale,
         1.0,
-        screen_params.ambient,
+        app_config.ambient,
     );
 
     let screen_params_buffer =
@@ -331,7 +331,7 @@ fn run(
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Screen Params Buffer"),
-                contents: bytemuck::cast_slice(&[screen_params.uniform(1.0, 1, 1, &stereo_mode)]),
+                contents: bytemuck::cast_slice(&[app_config.uniform(1.0, 1, 1, &stereo_mode)]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
@@ -587,9 +587,12 @@ fn run(
     let mut recenter_request = None;
     let mut last_invalidation_check = std::time::Instant::now();
     let mut last_upgrade_check = std::time::Instant::now();
-    let mut input_context = InputContext::init(&xr_context.instance)
-        .map(Some)
-        .unwrap_or(None);
+    let mut input_context = match app_config.no_input {
+        false => InputContext::init(&xr_context.instance)
+            .map(Some)
+            .unwrap_or(None),
+        true => None,
+    };
 
     if input_context.is_some() {
         let mut attach_context = input_context
@@ -604,7 +607,7 @@ fn run(
             input_context = Some(attach_context);
         }
     } else {
-        log::error!("No input context available");
+        log::debug!("No input context available");
     }
 
     let mut jitter_frame: u32 = 0;
@@ -697,7 +700,7 @@ fn run(
                 wgpu_context.queue.write_buffer(
                     &screen_params_buffer,
                     0,
-                    bytemuck::cast_slice(&[screen_params.uniform(
+                    bytemuck::cast_slice(&[app_config.uniform(
                         aspect,
                         screen_texture.texture.width() * width_multiplier,
                         ambient_texture.current().texture.width() * width_multiplier,
@@ -1081,32 +1084,32 @@ fn run(
                 }
                 Some(AppCommands::ToggleSettings(setting)) => match setting {
                     ToggleSetting::SwapEyes => {
-                        screen_params.swap_eyes = !screen_params.swap_eyes;
+                        app_config.swap_eyes = !app_config.swap_eyes;
                         screen_invalidated = true;
                     }
                     ToggleSetting::FlipX => {
-                        screen_params.flip_x = !screen_params.flip_x;
+                        app_config.flip_x = !app_config.flip_x;
                         match stereo_mode {
                             StereoMode::Sbs | StereoMode::FullSbs => {
-                                screen_params.swap_eyes = !screen_params.swap_eyes;
+                                app_config.swap_eyes = !app_config.swap_eyes;
                             }
                             _ => {}
                         }
                         screen_invalidated = true;
                     }
                     ToggleSetting::FlipY => {
-                        screen_params.flip_y = !screen_params.flip_y;
+                        app_config.flip_y = !app_config.flip_y;
                         match stereo_mode {
                             StereoMode::Tab | StereoMode::FullTab => {
-                                screen_params.swap_eyes = !screen_params.swap_eyes;
+                                app_config.swap_eyes = !app_config.swap_eyes;
                             }
                             _ => {}
                         }
                         screen_invalidated = true;
                     }
                     ToggleSetting::AmbientLight => {
-                        screen_params.ambient = !screen_params.ambient;
-                        screen.change_ambient_mode(screen_params.ambient);
+                        app_config.ambient = !app_config.ambient;
+                        screen.change_ambient_mode(app_config.ambient);
                         screen_invalidated = true;
                     }
                 },
@@ -1134,10 +1137,10 @@ fn run(
 
                 if config_changed {
                     if let Some(new_params) = config.last_config.clone() {
-                        screen_params = new_params;
-                        screen.change_scale(screen_params.scale);
-                        screen.change_distance(-screen_params.distance);
-                        screen.change_ambient_mode(screen_params.ambient);
+                        app_config = new_params;
+                        screen.change_scale(app_config.scale);
+                        screen.change_distance(-app_config.distance);
+                        screen.change_ambient_mode(app_config.ambient);
                         screen_invalidated = true;
                     }
                 }
