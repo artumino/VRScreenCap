@@ -41,7 +41,8 @@ vr-screen-cap.exe [OPTIONS]
     --flip-y=false
     --distance=20.0
     --scale=10.0
-    --ambient=false
+    --ambient=true
+    --no-input=false
     --config-file=<file-path>
 ```
 Where every distance is in meters. The effects of horizontal and vertical curvature are summed together, with a curvature of 1.0 the center of the screen will be bent inwards of about half its size.
@@ -61,14 +62,14 @@ A json configuration file can be provided and it will be watched for changes, th
 ### Windows
 The release version published here were compiled with the following configuration:
 ```
-cargo build --release --no-default-features
+cargo build --release --no-default-features --features dist
 ```
 
 ### Android Targets
 Standalone is still in experimental phase:
 1. Install *cargo-apk* `cargo install cargo-apk`
 2. Add android targets to your rust installation `rustup target add aarch64-linux-android`
-3. Build through `cargo apk build --no-default-features`
+3. Build through `cargo apk build --no-default-features --features dist`
 
 ## WMR Users Disclaimer
 

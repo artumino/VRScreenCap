@@ -1,6 +1,6 @@
 [package]
 name = "vr-screen-cap"
-version = "0.4.0"
+version = "0.4.0-dev8"
 edition = "2021"
 build = "build.rs"
 authors = ["Jacopo Libe <jacopo.libe@gmail.com>"]
@@ -15,32 +15,32 @@ crate-type = ["lib", "cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { git = "https://github.com/artumino/wgpu.git", branch = "feature/multiview_relaxed_validation" }
-wgpu-hal = { git = "https://github.com/artumino/wgpu.git", branch = "feature/multiview_relaxed_validation", features = ["vulkan"] }
-ash = "0.37.2"
+wgpu = { version = "0.17.0", git = "https://github.com/artumino/wgpu.git", branch = "fix/multiview_validation" }
+wgpu-hal = { version = "0.17.0", git = "https://github.com/artumino/wgpu.git", branch = "fix/multiview_validation", features = ["vulkan"] }
+ash = "0.37.3"
 mint = "0.5.9"
 cgmath = { version = "0.18.0", features=["mint"] }
-bytemuck = { version = "1.13.1", features = [ "derive" ] }
+bytemuck = { version = "1.14.0", features = [ "derive" ] }
 log4rs = "1.2.0"
-log = "0.4.17"
+log = "0.4.20"
 log-panics = { version = "2.1.0", features=["with-backtrace"] }
-clap = { version = "4.2.2", features=["derive"] }
+clap = { version = "4.4.2", features=["derive"] }
 thread-priority = "0.13.1"
-serde = "1.0.160"
-serde_json = "1.0.96"
-notify = "5.1.0"
+serde = "1.0.188"
+serde_json = "1.0.105"
+notify = "6.1.1"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
 dhat = { version = "0.3.2", optional = true }
 renderdoc = { version = "0.11.0", optional = true }
-profiling = { version = "1.0.8", optional = true, features = ["profile-with-tracy"] }
-tracy-client = { version = "0.15.2", optional = true }
-anyhow = "1.0.70"
-tobj = "3.2.5"
+profiling = { version = "1.0.10", optional = true, features = ["profile-with-tracy"] }
+tracy-client = { version = "0.16.1", optional = true }
+anyhow = "1.0.75"
+tobj = "4.0.0"
 
 # PLATFORM DEPENDENT
-[target.'cfg(not(target_os = "android"))'.dependencies]
-tray-item = "0.7.1"
-windows = { version = "0.48.0", features = [
+[target.'cfg(not(any(target_os = "android", target_os = "linux")))'.dependencies]
+tray-item = "0.8.0"
+windows = { version = "0.51.1", features = [
         "Win32_System_Memory",
         "Win32_Security",
         "Win32_Foundation",
@@ -51,10 +51,12 @@ windows = { version = "0.48.0", features = [
         "Win32_Graphics_Dxgi",
         "Win32_System_Threading"
 ]}
-openxr = { version = "0.17.1", features =  [ "static", "mint" ] }
+captrs = "0.3.1"
+win_desktop_duplication = { git = "https://github.com/artumino/win_desktop_duplication.git", branch = "dev" }
+openxr = { version = "0.17.1", features =  [ "static", "mint" ], git = "https://github.com/artumino/openxrs.git" }
 
 [target.'cfg(target_os = "android")'.dependencies]
-openxr = { version = "0.17.1", features =  [ "loaded", "mint" ] }
+openxr = { version = "0.17.1", features =  [ "loaded", "mint" ], git = "https://github.com/artumino/openxrs.git"  }
 jni = "0.21.1"
 ndk = "0.7"
 ndk-glue = "0.7"
@@ -69,6 +71,7 @@ default = ["renderdoc"]
 dhat-heap = ["dep:dhat"]
 renderdoc = ["dep:renderdoc"]
 profiling = ["dep:profiling", "dep:tracy-client"]
+dist = []
 
 # ANDROID
 [package.metadata.android]
@@ -129,3 +132,6 @@ keystore_password = "test1234"
 [package.metadata.android.signing.release]
 path = "keys/artum-dev.keystore"
 keystore_password = "test1234"
+
+[profile.release]
+lto = true

@@ -12,6 +12,7 @@ pub struct Entity {
 }
 
 impl Default for Entity {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn default() -> Self {
         //TODO registry
         Self::new(
@@ -24,6 +25,7 @@ impl Default for Entity {
 }
 
 impl Entity {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn new(
         id: usize,
         position: Vector3<f32>,
@@ -45,6 +47,7 @@ impl Entity {
         entity
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn update_matrices(&mut self, registry: &[Entity]) {
         self.local_matrix = Matrix4::from_translation(self.position)
             * Matrix4::from(self.rotation)
@@ -59,6 +62,7 @@ impl Entity {
         self.uniform_matrix.model_matrix = self.world_matrix.into();
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn uniform(&self) -> ModelUniform {
         self.uniform_matrix
     }
@@ -75,6 +79,7 @@ pub struct ModelUniform {
 }
 
 impl ModelUniform {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn new() -> Self {
         Self {
             model_matrix: cgmath::Matrix4::identity().into(),

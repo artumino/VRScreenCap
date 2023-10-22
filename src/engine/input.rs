@@ -7,8 +7,8 @@ pub struct InputContext {
     pub default: ActionSet,
     pub default_right_hand: Action<Posef>,
     pub default_left_hand: Action<Posef>,
-    pub default_right_hand_space: Option<Space>,
-    pub default_left_hand_space: Option<Space>,
+    default_right_hand_space: Option<Space>,
+    default_left_hand_space: Option<Space>,
     pub input_state: Option<InputState>,
 }
 
@@ -19,13 +19,19 @@ pub struct InputState {
 }
 
 impl InputContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn init(xr_instance: &Instance) -> anyhow::Result<InputContext> {
         let default_set =
             xr_instance.create_action_set("default", "Default controller actions", 0)?;
 
-        let right_hand = default_set.create_action("right_hand", "Right Hand Controller", &[])?;
+        let right_hand = default_set.create_action::<openxr::Posef>(
+            "right_hand",
+            "Right Hand Controller",
+            &[],
+        )?;
 
-        let left_hand = default_set.create_action("left_hand", "Left Hand Controller", &[])?;
+        let left_hand =
+            default_set.create_action::<openxr::Posef>("left_hand", "Left Hand Controller", &[])?;
 
         xr_instance.suggest_interaction_profile_bindings(
             xr_instance.string_to_path("/interaction_profiles/khr/simple_controller")?,
@@ -51,25 +57,15 @@ impl InputContext {
         })
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn attach_to_session<T>(&mut self, xr_session: &Session<T>) -> anyhow::Result<()> {
         xr_session.attach_action_sets(&[&self.default])?;
-
-        self.default_right_hand_space = Some(self.default_right_hand.create_space(
-            xr_session.clone(),
-            Path::NULL,
-            Posef::IDENTITY,
-        )?);
-
-        self.default_left_hand_space = Some(self.default_left_hand.create_space(
-            xr_session.clone(),
-            Path::NULL,
-            Posef::IDENTITY,
-        )?);
 
         Ok(())
     }
 
-    pub fn process_inputs<T>(
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    pub fn process_inputs<T: openxr::Graphics>(
         &mut self,
         xr_session: &Session<T>,
         xr_frame_state: &FrameState,
@@ -78,17 +74,22 @@ impl InputContext {
     ) -> anyhow::Result<()> {
         xr_session.sync_actions(&[(&self.default).into()])?;
 
-        let right_location = self
-            .default_right_hand_space
-            .as_ref()
-            .context("Right hand space not initialized")?
-            .locate(xr_view_space, xr_frame_state.predicted_display_time)?;
+        let left_space = Self::get_or_create_action_space(
+            xr_session,
+            &mut self.default_left_hand_space,
+            &self.default_left_hand,
+        )?;
+        let right_space = Self::get_or_create_action_space(
+            xr_session,
+            &mut self.default_right_hand_space,
+            &self.default_right_hand,
+        )?;
 
-        let left_location = self
-            .default_left_hand_space
-            .as_ref()
-            .context("Left hand space not initialized")?
-            .locate(xr_view_space, xr_frame_state.predicted_display_time)?;
+        let right_location =
+            right_space.locate(xr_view_space, xr_frame_state.predicted_display_time)?;
+
+        let left_location =
+            left_space.locate(xr_view_space, xr_frame_state.predicted_display_time)?;
 
         let right_hand_distance = (right_location.pose.position.x.powi(2)
             + right_location.pose.position.y.powi(2)
@@ -127,6 +128,20 @@ impl InputContext {
         Ok(())
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    fn get_or_create_action_space<'a, T: openxr::Graphics>(
+        session: &Session<T>,
+        space: &'a mut Option<Space>,
+        action: &Action<Posef>,
+    ) -> anyhow::Result<&'a Space> {
+        if space.is_none() {
+            *space = Some(action.create_space(session.clone(), Path::NULL, Posef::IDENTITY)?);
+        }
+
+        space.as_ref().context("Cannot get or create action space")
+    }
+
+    #[cfg_attr(feature = "profiling", profiling::function)]
     fn compute_input_state(
         input_state: &Option<InputState>,
         right_active: bool,
@@ -163,5 +178,11 @@ impl InputContext {
             near_start,
             count_change,
         }
+    }
+
+    #[cfg_attr(feature = "profiling", profiling::function)]
+    pub fn reset_space(&mut self) {
+        self.default_left_hand_space = None;
+        self.default_right_hand_space = None;
     }
 }

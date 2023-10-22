@@ -23,6 +23,7 @@ impl Default for Camera {
 }
 
 impl Camera {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn update_projection_from_tangents(&mut self, fov: Fovf) {
         let tan_right = fov.angle_right.tan();
         let tan_left = fov.angle_left.tan();
@@ -52,10 +53,12 @@ impl Camera {
     }
 
     #[allow(unused)]
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn update_projection(&mut self, fov: Rad<f32>, aspect_ratio: f32) {
         self.projection = cgmath::perspective(fov, aspect_ratio, self.near, self.far)
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn build_view_projection_matrix(&self) -> anyhow::Result<Matrix4<f32>> {
         Ok(self.projection
             * self
@@ -77,12 +80,14 @@ pub struct CameraUniform {
 }
 
 impl CameraUniform {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn new() -> Self {
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn update_view_proj(&mut self, camera: &Camera) -> anyhow::Result<()> {
         self.view_proj = camera.build_view_projection_matrix()?.into();
         Ok(())

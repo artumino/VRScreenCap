@@ -1,3 +1,4 @@
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn halton(i: u32, b: u32) -> f32 {
     let mut f = 1.0;
     let mut r = 0.0;
@@ -10,6 +11,7 @@ pub fn halton(i: u32, b: u32) -> f32 {
     r
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn get_jitter(jitter_index: u32, resolution: &[f32; 2]) -> [f32; 2] {
     let jitter = [
         2.0 * halton(jitter_index, 2) - 1.0,

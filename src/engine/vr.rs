@@ -1,15 +1,18 @@
+use std::ffi::c_char;
+
 use anyhow::{bail, Context};
 use ash::vk::{self, Handle, QueueGlobalPriorityKHR};
-use hal::MemoryFlags;
-use openxr as xr;
-use wgpu::{Device, Extent3d};
-use wgpu_hal as hal;
 
-use crate::conversions::vulkan_image_to_texture;
+use openxr as xr;
+use wgpu::Device;
+use wgpu_hal as hal;
+use xr::SystemId;
+
+use crate::engine::swapchain::SwapchainCreationInfo;
 
 use super::{
-    texture::{Texture2D, Unbound},
-    WgpuLoader, WgpuRunner, TARGET_VULKAN_VERSION,
+    formats::InternalColorFormat, swapchain::Swapchain, WgpuContext, WgpuLoader, WgpuRunner,
+    TARGET_VULKAN_VERSION,
 };
 
 pub struct OpenXRContext {
@@ -22,19 +25,19 @@ pub struct OpenXRContext {
 
 pub const VIEW_TYPE: openxr::ViewConfigurationType = openxr::ViewConfigurationType::PRIMARY_STEREO;
 pub const VIEW_COUNT: u32 = 2;
-pub const SWAPCHAIN_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
-pub const VK_SWAPCHAIN_COLOR_FORMAT: vk::Format = vk::Format::B8G8R8A8_SRGB;
+pub const SWAPCHAIN_COLOR_FORMAT: InternalColorFormat = InternalColorFormat::Bgra8UnormSrgb;
 
-#[cfg(debug_assertions)]
+#[cfg(not(feature = "dist"))]
 pub fn openxr_layers() -> [&'static str; 0] {
     [] //TODO: ["VK_LAYER_KHRONOS_validation"]
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(feature = "dist")]
 pub fn openxr_layers() -> [&'static str; 0] {
     []
 }
 
+#[cfg_attr(feature = "profiling", profiling::function)]
 pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     #[cfg(not(target_os = "android"))]
     let entry = openxr::Entry::linked();
@@ -53,9 +56,21 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
 
     #[cfg(target_os = "android")]
     {
+        assert!(available_extensions.khr_android_create_instance);
         enabled_extensions.khr_android_create_instance = true;
     }
     log::info!("Enabled extensions: {:?}", enabled_extensions);
+
+    #[cfg(not(feature = "dist"))]
+    {
+        for layer in entry.enumerate_layers()? {
+            log::info!(
+                "[OPENXR] Found layer: {} {:?}",
+                layer.layer_name,
+                layer.spec_version
+            );
+        }
+    }
 
     log::info!("Loading OpenXR Runtime...");
     let instance = entry.create_instance(
@@ -77,7 +92,18 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     );
 
     // Request a form factor from the device (HMD, Handheld, etc.)
-    let system = instance.system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY)?;
+    let system = loop {
+        match instance.system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY) {
+            Ok(system) => break system,
+            Err(err) => {
+                if err != openxr::sys::Result::ERROR_FORM_FACTOR_UNAVAILABLE {
+                    return Err(err.into());
+                }
+            }
+        }
+        log::warn!("No HMD detected, trying again in 1 second");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    };
 
     // Check what blend mode is valid for this device (opaque vs transparent displays). We'll just
     // take the first one available!
@@ -98,14 +124,88 @@ pub fn enable_xr_runtime() -> anyhow::Result<OpenXRContext> {
     })
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(feature = "dist")]
 fn instance_flags() -> hal::InstanceFlags {
     hal::InstanceFlags::empty()
 }
 
-#[cfg(debug_assertions)]
+#[cfg(not(feature = "dist"))]
 fn instance_flags() -> hal::InstanceFlags {
-    hal::InstanceFlags::empty() | hal::InstanceFlags::VALIDATION | hal::InstanceFlags::DEBUG
+    hal::InstanceFlags::VALIDATION | hal::InstanceFlags::DEBUG
+}
+
+#[cfg(not(feature = "dist"))]
+fn vulkan_layers() -> Vec<*const c_char> {
+    use std::ffi::CStr;
+
+    let layer_names = [CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0").unwrap()];
+    layer_names
+        .iter()
+        .map(|raw_name| raw_name.as_ptr())
+        .collect()
+}
+
+#[cfg(not(feature = "dist"))]
+fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreateInfoEXT> {
+    use std::ptr;
+
+    use crate::utils::validation;
+
+    Some(vk::DebugUtilsMessengerCreateInfoEXT {
+        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        p_next: ptr::null(),
+        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE |
+            // vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
+        pfn_user_callback: Some(validation::debug_callback),
+        p_user_data: ptr::null_mut(),
+    })
+}
+
+#[cfg(not(feature = "dist"))]
+fn setup_debug_utils(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+) -> (
+    Option<ash::extensions::ext::DebugUtils>,
+    Option<vk::DebugUtilsMessengerEXT>,
+) {
+    let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
+    let messenger_ci = populate_debug_messenger_create_info().unwrap();
+
+    let utils_messenger = unsafe {
+        debug_utils_loader
+            .create_debug_utils_messenger(&messenger_ci, None)
+            .expect("Debug Utils Callback")
+    };
+
+    (Some(debug_utils_loader), Some(utils_messenger))
+}
+
+#[cfg(feature = "dist")]
+fn vulkan_layers() -> Vec<*const c_char> {
+    vec![]
+}
+
+#[cfg(feature = "dist")]
+fn populate_debug_messenger_create_info() -> Option<vk::DebugUtilsMessengerCreateInfoEXT> {
+    None
+}
+
+#[cfg(feature = "dist")]
+fn setup_debug_utils(
+    _entry: &ash::Entry,
+    _instance: &ash::Instance,
+) -> (
+    Option<ash::extensions::ext::DebugUtils>,
+    Option<vk::DebugUtilsMessengerEXT>,
+) {
+    (None, None)
 }
 
 impl WgpuLoader for OpenXRContext {
@@ -113,7 +213,7 @@ impl WgpuLoader for OpenXRContext {
         // OpenXR wants to ensure apps are using the correct graphics card and Vulkan features and
         // extensions, so the instance and device MUST be set up before Instance::create_session.
 
-        let wgpu_limits = wgpu::Limits::downlevel_webgl2_defaults();
+        let wgpu_limits = wgpu::Limits::default();
 
         let wgpu_features = wgpu::Features::MULTIVIEW;
         let vk_target_version = TARGET_VULKAN_VERSION; // Vulkan 1.1 guarantees multiview support
@@ -143,7 +243,7 @@ impl WgpuLoader for OpenXRContext {
 
         let flags = instance_flags();
 
-        let instance_extensions = <hal::api::Vulkan as hal::Api>::Instance::required_extensions(
+        let instance_extensions = <hal::api::Vulkan as hal::Api>::Instance::desired_extensions(
             &vk_entry,
             vk_target_version,
             flags,
@@ -153,9 +253,32 @@ impl WgpuLoader for OpenXRContext {
         let instance_extensions_ptrs: Vec<_> =
             instance_extensions.iter().map(|x| x.as_ptr()).collect();
 
-        let create_info = vk::InstanceCreateInfo::builder()
+        #[cfg(not(feature = "dist"))]
+        {
+            for layer in vk_entry.enumerate_instance_layer_properties()? {
+                log::info!(
+                    "[VULKAN] Found layer: {} {:?}",
+                    String::from_utf8_lossy(unsafe {
+                        &*(layer.layer_name.as_ref() as *const _ as *const [u8])
+                    }),
+                    layer.spec_version
+                );
+            }
+        }
+
+        let instance_layers = vulkan_layers();
+
+        // This create info used to debug issues in vk::createInstance and vk::destroyInstance.
+        let mut debug_info = populate_debug_messenger_create_info();
+
+        let mut create_info = vk::InstanceCreateInfo::builder()
             .application_info(&vk_app_info)
-            .enabled_extension_names(&instance_extensions_ptrs);
+            .enabled_extension_names(&instance_extensions_ptrs)
+            .enabled_layer_names(&instance_layers);
+
+        if let Some(debug_info) = &mut debug_info {
+            create_info = create_info.push_next(debug_info);
+        }
 
         let vk_instance = unsafe {
             let vk_instance = self
@@ -175,6 +298,8 @@ impl WgpuLoader for OpenXRContext {
         };
 
         log::info!("Successfully created Vulkan instance");
+
+        let (debug_utils, debug_messenger) = setup_debug_utils(&vk_entry, &vk_instance);
 
         let vk_physical_device = vk::PhysicalDevice::from_raw(unsafe {
             self.instance
@@ -217,6 +342,7 @@ impl WgpuLoader for OpenXRContext {
                 vk_instance.clone(),
                 vk_target_version,
                 0,
+                None,
                 instance_extensions,
                 flags,
                 false,
@@ -229,64 +355,29 @@ impl WgpuLoader for OpenXRContext {
 
         log::info!("Created WGPU-HAL instance and adapter");
 
-        //TODO actually check if the extensions are available and avoid using them in the loaders
-        let mut device_extensions = hal_exposed_adapter
-            .adapter
-            .required_device_extensions(wgpu_features);
-
-        #[cfg(target_os = "windows")]
-        device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
-
-        log::info!("Requested device extensions: {:?}", device_extensions);
-
-        let family_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(queue_family_index)
-            .queue_priorities(&[1.0])
-            .push_next(
-                &mut vk::DeviceQueueGlobalPriorityCreateInfoKHR::builder()
-                    .global_priority(QueueGlobalPriorityKHR::REALTIME_EXT),
-            )
-            .build();
-
-        let device_extensions_ptrs = device_extensions
-            .iter()
-            .map(|x| x.as_ptr())
-            .collect::<Vec<_>>();
-
-        let mut enabled_features = hal_exposed_adapter
-            .adapter
-            .physical_device_features(&device_extensions, wgpu_features);
-
-        let device_create_info = enabled_features
-            .add_to_device_create_builder(
-                vk::DeviceCreateInfo::builder()
-                    .enabled_extension_names(&device_extensions_ptrs)
-                    .queue_create_infos(&[family_info])
-                    .push_next(&mut vk::PhysicalDeviceMultiviewFeatures {
-                        multiview: vk::TRUE,
-                        ..Default::default()
-                    }),
-            )
-            .build();
-
-        let vk_device = {
-            unsafe {
-                let vk_device = self
-                    .instance
-                    .create_vulkan_device(
-                        self.system,
-                        std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
-                        vk_physical_device.as_raw() as _,
-                        &device_create_info as *const _ as *const _,
-                    )
-                    .context("XR error creating Vulkan device")?
-                    .map_err(vk::Result::from_raw)
-                    .context("Vulkan error creating Vulkan device")?;
-
-                log::info!("Creating ash vulkan device device from native");
-                ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
-            }
+        let device_create_info = VkDeviceCreateInfo {
+            xr_instance: &self.instance.clone(),
+            system_id: self.system,
+            hal_exposed_adapter: &hal_exposed_adapter,
+            wgpu_features,
+            queue_family_index,
+            vk_entry: &vk_entry,
+            vk_physical_device,
+            vk_instance: &vk_instance,
         };
+
+        let mut global_queue_priority = vk::DeviceQueueGlobalPriorityCreateInfoKHR::builder()
+            .global_priority(QueueGlobalPriorityKHR::HIGH);
+
+        let mut device_creation_result =
+            create_vk_device(device_create_info, Some(&mut global_queue_priority));
+
+        if device_creation_result.is_err() {
+            log::warn!("Failed to create Vulkan device with realtime priority, trying without");
+            device_creation_result = create_vk_device(device_create_info, None);
+        }
+
+        let (device_extensions, family_info, vk_device) = device_creation_result?;
 
         let vk_device_ptr = vk_device.handle().as_raw();
         log::info!("Successfully created Vulkan device");
@@ -331,12 +422,26 @@ impl WgpuLoader for OpenXRContext {
             device: wgpu_device,
             physical_device: wgpu_adapter,
             queue: wgpu_queue,
-            queue_index: family_info.queue_family_index,
+            family_queue_index: family_info.queue_family_index,
             vk_entry,
             vk_device_ptr,
             vk_instance_ptr: vk_instance.handle().as_raw(),
             vk_phys_device_ptr: vk_physical_device.as_raw(),
+            debug_messenger,
+            debug_utils,
         })
+    }
+}
+
+impl Drop for WgpuContext {
+    fn drop(&mut self) {
+        if let (Some(debug_messenger), Some(debug_utils_loader)) =
+            (self.debug_messenger, self.debug_utils.take())
+        {
+            unsafe {
+                debug_utils_loader.destroy_debug_utils_messenger(debug_messenger, None);
+            }
+        }
     }
 }
 
@@ -347,15 +452,12 @@ impl WgpuRunner for OpenXRContext {
 }
 
 impl OpenXRContext {
+    #[cfg_attr(feature = "profiling", profiling::function)]
     pub fn create_swapchain(
         &self,
         xr_session: &openxr::Session<openxr::Vulkan>,
         device: &Device,
-    ) -> anyhow::Result<(
-        openxr::Swapchain<openxr::Vulkan>,
-        vk::Extent2D,
-        Vec<Texture2D<Unbound>>,
-    )> {
+    ) -> anyhow::Result<(Swapchain, vk::Extent2D)> {
         log::info!("Creating OpenXR swapchain");
 
         // Fetch the views we need to render to (the eye screens on the HMD)
@@ -370,66 +472,109 @@ impl OpenXRContext {
             width: views[0].recommended_image_rect_width,
             height: views[0].recommended_image_rect_height,
         };
-        let xr_swapchain = xr_session.create_swapchain(&openxr::SwapchainCreateInfo {
-            create_flags: openxr::SwapchainCreateFlags::EMPTY,
-            usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT
-                | openxr::SwapchainUsageFlags::SAMPLED,
-            format: VK_SWAPCHAIN_COLOR_FORMAT.as_raw() as _,
-            sample_count: 1,
-            width: resolution.width,
-            height: resolution.height,
-            face_count: 1,
-            array_size: VIEW_COUNT,
-            mip_count: 1,
-        })?;
 
-        // Create image views for the swapchain
-        let swapcain_textures: Vec<_> = xr_swapchain
-            .enumerate_images()?
-            .into_iter()
-            .map(|image| {
-                let wgpu_tex_desc = wgpu::TextureDescriptor {
-                    label: Some("Swapchain Target"),
-                    size: Extent3d {
-                        width: resolution.width,
-                        height: resolution.height,
-                        depth_or_array_layers: VIEW_COUNT,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: SWAPCHAIN_COLOR_FORMAT,
-                    view_formats: &[],
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
-                };
+        //TODO: Enumerate swapchain formats and pick the best one, remember that WGPU gamma corrects everything
+        let color_swapchain = Swapchain::new(
+            "OpenXR Swapchain Image",
+            xr_session,
+            device,
+            SwapchainCreationInfo {
+                resolution,
+                format: SWAPCHAIN_COLOR_FORMAT,
+                view_format: Some(SWAPCHAIN_COLOR_FORMAT.to_norm()),
+                usage_flags: openxr::SwapchainUsageFlags::COLOR_ATTACHMENT,
+                view_count: VIEW_COUNT,
+            },
+        )?;
 
-                let wgpu_hal_tex_desc = wgpu_hal::TextureDescriptor {
-                    label: wgpu_tex_desc.label,
-                    size: wgpu_tex_desc.size,
-                    mip_level_count: wgpu_tex_desc.mip_level_count,
-                    sample_count: wgpu_tex_desc.sample_count,
-                    dimension: wgpu_tex_desc.dimension,
-                    format: wgpu_tex_desc.format,
-                    view_formats: vec![],
-                    usage: wgpu_hal::TextureUses::COLOR_TARGET | wgpu_hal::TextureUses::COPY_DST,
-                    memory_flags: MemoryFlags::empty(),
-                };
+        if color_swapchain.is_empty() {
+            return Err(anyhow::anyhow!("No swapchain images"));
+        }
 
-                // Create a WGPU image view for this image
-                // TODO: Move this to Texture2D::from_vk_image
-                let wgpu_texture = vulkan_image_to_texture(
-                    device,
-                    vk::Image::from_raw(image),
-                    wgpu_tex_desc,
-                    wgpu_hal_tex_desc,
-                );
-
-                Texture2D::<Unbound>::from_wgpu(device, wgpu_texture)
-            })
-            .collect();
-
-        Ok((xr_swapchain, resolution, swapcain_textures))
+        Ok((color_swapchain, resolution))
     }
+}
+
+#[derive(Clone, Copy)]
+struct VkDeviceCreateInfo<'a> {
+    xr_instance: &'a openxr::Instance,
+    system_id: SystemId,
+    hal_exposed_adapter: &'a hal::ExposedAdapter<hal::vulkan::Api>,
+    wgpu_features: wgpu::Features,
+    queue_family_index: u32,
+    vk_entry: &'a ash::Entry,
+    vk_physical_device: vk::PhysicalDevice,
+    vk_instance: &'a ash::Instance,
+}
+
+fn create_vk_device<'a>(
+    create_info: VkDeviceCreateInfo<'_>,
+    global_queue_priority: Option<&'a mut vk::DeviceQueueGlobalPriorityCreateInfoKHR>,
+) -> Result<
+    (
+        Vec<&'static std::ffi::CStr>,
+        vk::DeviceQueueCreateInfoBuilder<'a>,
+        ash::Device,
+    ),
+    anyhow::Error,
+> {
+    let VkDeviceCreateInfo {
+        xr_instance,
+        system_id,
+        hal_exposed_adapter,
+        wgpu_features,
+        queue_family_index,
+        vk_entry,
+        vk_physical_device,
+        vk_instance,
+    } = create_info;
+
+    let mut device_extensions = hal_exposed_adapter
+        .adapter
+        .required_device_extensions(wgpu_features);
+    #[cfg(target_os = "windows")]
+    device_extensions.push(ash::extensions::khr::ExternalMemoryWin32::name());
+    log::info!("Requested device extensions: {:?}", device_extensions);
+    let mut family_info = vk::DeviceQueueCreateInfo::builder()
+        .queue_family_index(queue_family_index)
+        .queue_priorities(&[1.0]);
+
+    if let Some(global_queue_priority) = global_queue_priority {
+        family_info = family_info.push_next(global_queue_priority);
+    }
+
+    let device_extensions_ptrs = device_extensions
+        .iter()
+        .map(|x| x.as_ptr())
+        .collect::<Vec<_>>();
+    let mut enabled_features = hal_exposed_adapter
+        .adapter
+        .physical_device_features(&device_extensions, wgpu_features);
+    let mut multiview_params = vk::PhysicalDeviceMultiviewFeatures {
+        multiview: vk::TRUE,
+        ..Default::default()
+    };
+    let device_create_info = enabled_features
+        .add_to_device_create_builder(vk::DeviceCreateInfo::builder())
+        .queue_create_infos(std::slice::from_ref(&family_info))
+        .enabled_extension_names(&device_extensions_ptrs)
+        .push_next(&mut multiview_params);
+    let vk_device = {
+        unsafe {
+            let vk_device = xr_instance
+                .create_vulkan_device(
+                    system_id,
+                    std::mem::transmute(vk_entry.static_fn().get_instance_proc_addr),
+                    vk_physical_device.as_raw() as _,
+                    &device_create_info as *const _ as *const _,
+                )
+                .context("XR error creating Vulkan device")?
+                .map_err(vk::Result::from_raw)
+                .context("Vulkan error creating Vulkan device")?;
+
+            log::info!("Creating ash vulkan device device from native");
+            ash::Device::load(vk_instance.fp_v1_0(), vk::Device::from_raw(vk_device as _))
+        }
+    };
+    Ok((device_extensions, family_info, vk_device))
 }
