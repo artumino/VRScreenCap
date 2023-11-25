@@ -50,7 +50,7 @@ pub fn setup_logging() -> anyhow::Result<()> {
                 .build("vr-screen-cap", LevelFilter::Info),
             Logger::builder()
                 .appender("logfile")
-                .build("vr_screen_cap_core", LevelFilter::Info),
+                .build("vr_screen_cap", LevelFilter::Info),
             Logger::builder()
                 .appender("logfile")
                 .build("wgpu", LevelFilter::Warn),

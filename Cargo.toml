@@ -8,10 +8,6 @@ description = "A very simple rust program that uses the Vulkan backend of WPGU c
 license = "MIT"
 repository = "https://github.com/artumino/VRScreenCap"
 
-[lib]
-name = "vr_screen_cap_core"
-crate-type = ["lib", "cdylib"]
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -57,9 +53,6 @@ openxr = { version = "0.17.1", features =  [ "static", "mint" ], git = "https://
 
 [target.'cfg(target_os = "android")'.dependencies]
 openxr = { version = "0.17.1", features =  [ "loaded", "mint" ], git = "https://github.com/artumino/openxrs.git"  }
-jni = "0.21.1"
-ndk = "0.7"
-ndk-glue = "0.7"
 
 # BUILD
 
@@ -67,71 +60,11 @@ ndk-glue = "0.7"
 winres = "0.1"
 
 [features]
-default = ["renderdoc"]
+default = []
 dhat-heap = ["dep:dhat"]
 renderdoc = ["dep:renderdoc"]
 profiling = ["dep:profiling", "dep:tracy-client"]
 dist = []
-
-# ANDROID
-[package.metadata.android]
-apk_label = "VR Screen Cap"
-fullscreen = true
-runtime_libs = "libs"
-target_sdk_version = 21
-
-[[package.metadata.android.uses_permission]]
-name = "android.permission.INTERNET"
-
-[[package.metadata.android.uses_permission]]
-name = "android.permission.ACCESS_NETWORK_STATE"
-
-[[package.metadata.android.uses_permission]]
-name = "android.permission.WRITE_EXTERNAL_STORAGE"
-
-[package.metadata.android.application]
-debuggable = true
-label = "VR Screen Cap"
-theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
-
-[package.metadata.android.application.activity]
-config_changes = "screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode"
-launch_mode = "singleTask"
-orientation = "landscape"
-
-[[package.metadata.android.application.meta_data]]
-name = "com.oculus.supportedDevices"
-value = "quest|quest2"
-
-[[package.metadata.android.application.meta_data]]
-name = "com.oculus.intent.category.VR"
-value = "vr_only"
-
-[[package.metadata.android.application.activity.intent_filter]]
-actions = ["android.intent.action.MAIN"]
-categories = ["com.oculus.intent.category.VR", "android.intent.category.LAUNCHER"]
-
-[[package.metadata.android.application.activity.meta_data]]
-name = "com.oculus.vr.focusaware"
-value = "true"
-
-[[package.metadata.android.uses_feature]]
-name = "android.hardware.vulkan.level"
-required = true
-version = 0x00401000
-
-[[package.metadata.android.uses_feature]]
-name = "android.hardware.vr.headtracking"
-required = true
-version = 1
-
-[package.metadata.android.signing.dev]
-path = "keys/artum-dev.keystore"
-keystore_password = "test1234"
-
-[package.metadata.android.signing.release]
-path = "keys/artum-dev.keystore"
-keystore_password = "test1234"
 
 [profile.release]
 lto = true
